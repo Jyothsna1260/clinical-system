@@ -166,8 +166,8 @@ On Linux, create the data folder before the first `docker compose up` so the con
 | `JWT_SECRET` | dev placeholder | **Required in production**, at least 32 random characters |
 | `JWT_EXPIRE_MINUTES` | `720` | |
 | `FRONTEND_ORIGIN` | `http://localhost:5173` | CORS; comma-separated list |
-| `LLM_PROVIDER` | `none` | `anthropic` \| `openai` \| `none` (offline, rule-based) |
-| `LLM_API_KEY` / `LLM_MODEL` | — | Model defaults: `claude-opus-5-5` / `gpt-4o-mini` |
+| `LLM_PROVIDER` | `none` | `gemini` \| `anthropic` \| `openai` \| `none` (offline, rule-based). Without `LLM_API_KEY` the app stays offline. |
+| `LLM_API_KEY` / `LLM_MODEL` | — | Model defaults: `gemini-flash-latest` / `claude-opus-5-5` / `gpt-4o-mini`. Free Gemini key: https://aistudio.google.com/apikey |
 | `EMBEDDINGS_ENABLED` | `true` | `false` uses the deterministic keyword retriever |
 | `EMBEDDING_MODEL` | `sentence-transformers/all-MiniLM-L6-v2` | |
 | `MAX_UPLOAD_MB` / `STALE_DAYS` | `20` / `90` | |

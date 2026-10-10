@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 720
 
-    llm_provider: Literal["anthropic", "openai", "none"] = "none"
+    llm_provider: Literal["gemini", "anthropic", "openai", "none"] = "none"
     llm_api_key: str | None = None
     llm_model: str | None = None
     llm_timeout_seconds: float = 60.0
