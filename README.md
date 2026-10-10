@@ -13,6 +13,7 @@ patient profile, evaluates inclusion and exclusion criteria with six specialized
 | Author | [Jyothsna1260](https://github.com/Jyothsna1260) |
 | Demo login (after seeding) | `demo@example.org` / `demo-password-123` (or click **Use the demo account**) |
 | User guide | [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md) |
+| Architecture and code flow | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) |
 | Demo data | [`docs/DEMO_DATA.md`](docs/DEMO_DATA.md): 4 synthetic protocols, 10 synthetic patients, 9 reference assessments |
 | Demo video automation | [`demo/README.md`](demo/README.md): records a narrated walkthrough (MP4 + screenshots) |
 
@@ -62,15 +63,15 @@ EXC-01 becomes **TRIGGERED**.
 
 ```
 backend/app/
-  main.py, config.py
+  main.py, config.py, errors.py (AppError raised by services)
   storage/           file store: records.py (typed records), file_store.py (atomic JSON documents, audit log)
   schemas/           clinical.py (Criterion, CriterionEvaluation, SilentExclusionTrigger, EligibilityResult, …), api.py
-  api/routes/        auth, trials, patients, eligibility, health  (+ api/errors.py structured errors)
+  api/routes/        thin HTTP routers: auth, trials, patients, eligibility, health  (+ api/errors.py handlers)
   agents/            protocol_extraction, patient_profile, inclusion_matching, exclusion_detection, contradiction, reviewer
   engine/            comparators.py, units.py, dates.py, vocabulary.py, rule_evaluator.py
   rag/               pdf_loader.py, chunker.py, index.py (FAISS / keyword), retriever.py (retrieval validation)
   workflow/          state.py (typed state), graph.py (LangGraph)
-  services/          llm.py (provider-agnostic), audit.py, trials.py, analysis.py (background runs)
+  services/          use cases: auth, trials, patients, eligibility, analysis (background runs), audit, llm
   security/          jwt.py, deps.py
 backend/tests/       tests + fixtures/ (synthetic PDFs, 4 synthetic patients)
 backend/scripts/     make_synthetic_protocol.py, seed.py

@@ -6,7 +6,7 @@
 # keyword retriever is used and agents and page citations are unchanged.
 services:
   - type: web
-    name: cte-system-jyothsna-api
+    name: cte-system-api
     runtime: docker
     rootDir: backend
     dockerfilePath: ./Dockerfile
@@ -22,7 +22,7 @@ services:
       - key: JWT_SECRET
         generateValue: true
       - key: FRONTEND_ORIGIN    # comma-separated; add a Vercel URL here if you also deploy there
-        value: https://cte-system-jyothsna-app.onrender.com,http://localhost:5173
+        value: https://cte-system-app.onrender.com,http://localhost:5173
       - key: LLM_PROVIDER
         value: none
       - key: LLM_API_KEY
@@ -33,14 +33,14 @@ services:
         value: /app/data
 
   - type: web
-    name: cte-system-jyothsna-app
+    name: cte-system-app
     runtime: static
     rootDir: frontend
     buildCommand: npm ci && npm run build
     staticPublishPath: dist
     envVars:
       - key: VITE_API_URL
-        value: https://cte-system-jyothsna-api.onrender.com
+        value: https://cte-system-api.onrender.com
       - key: NODE_VERSION
         value: "20"
     routes:

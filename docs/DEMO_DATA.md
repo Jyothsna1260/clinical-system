@@ -9,7 +9,7 @@ Load the data into any running backend, local or deployed:
 cd backend
 python -m scripts.seed --api-url http://localhost:8000 --analyze
 # or against Render:
-python -m scripts.seed --api-url https://cte-system-jyothsna-api.onrender.com --analyze
+python -m scripts.seed --api-url https://cte-system-api.onrender.com --analyze
 ```
 
 The seed script is idempotent: it skips protocols and patients that already exist.

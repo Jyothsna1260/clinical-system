@@ -7,25 +7,13 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app.errors import AppError
+
 log = logging.getLogger(__name__)
-
-
-class AppError(Exception):
-    def __init__(self, status_code: int, code: str, message: str, details: dict | None = None):
-        super().__init__(message)
-        self.status_code = status_code
-        self.code = code
-        self.message = message
-        self.details = details or {}
 
 
 def error_body(code: str, message: str, details: dict | None = None) -> dict:
     return {"error": {"code": code, "message": message, "details": details or {}}}
-
-
-def not_found(resource: str) -> AppError:
-    # Same response whether the record is missing or owned by someone else.
-    return AppError(404, "NOT_FOUND", f"{resource} not found.")
 
 
 def install_error_handlers(app: FastAPI) -> None:

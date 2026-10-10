@@ -3,7 +3,7 @@
 from fastapi import Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from app.api.errors import AppError
+from app.errors import AppError
 from app.security.jwt import decode_access_token
 from app.storage import Store, UserRecord, get_store
 

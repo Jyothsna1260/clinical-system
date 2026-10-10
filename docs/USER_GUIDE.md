@@ -8,7 +8,7 @@ cooperating agents return one of three answers: **Eligible**, **Not eligible** o
 > qualified clinician or trial investigator. Unknown values are reported, never guessed.
 > Use synthetic data only.
 
-- Live app: https://cte-system-jyothsna-app.onrender.com (free plan: the first request after
+- Live app: https://cte-system-app.onrender.com (free plan: the first request after
   an idle period takes about a minute)
 - Demo login: `demo@example.org` / `demo-password-123`, or click **Use the demo account**
 - Demo video and screenshots: see [`demo/README.md`](../demo/README.md)
