@@ -1,28 +1,28 @@
-# Render Blueprint: backend web service, frontend static site and managed Postgres, on Render's free plans.
+# Render Blueprint: backend web service and frontend static site.
 #
-# Free web services have 512 MB RAM and no persistent disk, so embeddings are off (the keyword
-# retriever is used; agents and page citations are unchanged) and retrieval indexes are rebuilt
-# from protocol text stored in Postgres. For FAISS + MiniLM retrieval switch to `plan: standard`,
-# set EMBEDDINGS_ENABLED to "true" and add a disk mounted at /app/data.
+# All data is stored as files under DATA_DIR. Render's free plan has no persistent disk, so data is
+# reset whenever the service restarts or redeploys. To keep data, switch the API to `plan: starter`
+# (or higher) and uncomment the `disk` block. Embeddings are off on the free plan (512 MB RAM); the
+# keyword retriever is used and agents and page citations are unchanged.
 services:
   - type: web
-    name: clinical-trial-eligibility-api
+    name: cte-system-jyothsna-api
     runtime: docker
     rootDir: backend
     dockerfilePath: ./Dockerfile
     plan: free
     healthCheckPath: /api/health
+    # disk:
+    #   name: cte-data
+    #   mountPath: /app/data
+    #   sizeGB: 1
     envVars:
       - key: APP_ENV
         value: production
       - key: JWT_SECRET
         generateValue: true
-      - key: DATABASE_URL
-        fromDatabase:
-          name: clinical-trial-eligibility-db
-          property: connectionString
       - key: FRONTEND_ORIGIN    # comma-separated; add a Vercel URL here if you also deploy there
-        value: https://clinical-trial-eligibility-app.onrender.com,http://localhost:5173
+        value: https://cte-system-jyothsna-app.onrender.com,http://localhost:5173
       - key: LLM_PROVIDER
         value: none
       - key: LLM_API_KEY
@@ -33,21 +33,17 @@ services:
         value: /app/data
 
   - type: web
-    name: clinical-trial-eligibility-app
+    name: cte-system-jyothsna-app
     runtime: static
     rootDir: frontend
     buildCommand: npm ci && npm run build
     staticPublishPath: dist
     envVars:
       - key: VITE_API_URL
-        value: https://clinical-trial-eligibility-api.onrender.com
+        value: https://cte-system-jyothsna-api.onrender.com
       - key: NODE_VERSION
         value: "20"
     routes:
       - type: rewrite
         source: /*
         destination: /index.html
-
-databases:
-  - name: clinical-trial-eligibility-db
-    plan: free

@@ -1,19 +1,18 @@
-"""Test configuration: fully offline (no LLM, keyword retriever), isolated SQLite DB."""
+"""Test configuration: fully offline (no LLM, keyword retriever), isolated file store."""
 
 import json
 import os
+import shutil
 import tempfile
 from pathlib import Path
 
 _TMP = Path(tempfile.mkdtemp(prefix="cte-tests-"))
 os.environ.update({
     "APP_ENV": "test",
-    "DATABASE_URL": f"sqlite:///{_TMP / 'test.db'}",
     "DATA_DIR": str(_TMP / "data"),
     "LLM_PROVIDER": "none",
     "LLM_API_KEY": "",
     "EMBEDDINGS_ENABLED": "false",
-    "MIGRATE_ON_STARTUP": "false",
     "JWT_SECRET": "test-secret",
 })
 
@@ -83,11 +82,12 @@ def run_workflow(load_patient):
 def client():
     from fastapi.testclient import TestClient
 
-    from app.database import Base, engine
+    from app.config import get_settings
     from app.main import app
+    from app.storage import reset_store
 
-    Base.metadata.drop_all(engine)
-    Base.metadata.create_all(engine)
+    shutil.rmtree(get_settings().data_dir, ignore_errors=True)
+    reset_store()
     with TestClient(app) as c:
         yield c
 

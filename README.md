@@ -10,8 +10,7 @@ patient profile, evaluates inclusion and exclusion criteria with six specialized
 
 | | |
 |---|---|
-| Live API | https://clinical-trial-eligibility-api.onrender.com/docs (Render free plan; first request after idle takes ~1 min) |
-| Live UI | https://clinical-trial-eligibility-app.onrender.com (Render static site) |
+| Author | [Jyothsna1260](https://github.com/Jyothsna1260) |
 | Demo login (after seeding) | `demo@example.org` / `demo-password-123` (or click **Use the demo account**) |
 | User guide | [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md) |
 | Demo data | [`docs/DEMO_DATA.md`](docs/DEMO_DATA.md): 4 synthetic protocols, 10 synthetic patients, 9 reference assessments |
@@ -63,8 +62,8 @@ EXC-01 becomes **TRIGGERED**.
 
 ```
 backend/app/
-  main.py, config.py, database.py
-  models/            SQLAlchemy tables (UUID PKs, owner_id, created/updated_at)
+  main.py, config.py
+  storage/           file store: records.py (typed records), file_store.py (atomic JSON documents, audit log)
   schemas/           clinical.py (Criterion, CriterionEvaluation, SilentExclusionTrigger, EligibilityResult, …), api.py
   api/routes/        auth, trials, patients, eligibility, health  (+ api/errors.py structured errors)
   agents/            protocol_extraction, patient_profile, inclusion_matching, exclusion_detection, contradiction, reviewer
@@ -73,8 +72,7 @@ backend/app/
   workflow/          state.py (typed state), graph.py (LangGraph)
   services/          llm.py (provider-agnostic), audit.py, trials.py, analysis.py (background runs)
   security/          jwt.py, deps.py
-backend/alembic/     migration 0001 (12 tables)
-backend/tests/       58 tests + fixtures/ (synthetic PDFs, 4 synthetic patients)
+backend/tests/       tests + fixtures/ (synthetic PDFs, 4 synthetic patients)
 backend/scripts/     make_synthetic_protocol.py, seed.py
 frontend/src/        pages/ (Login, Dashboard, TrialUpload, PatientForm, Analysis, Results), components/, api/client.ts, types.ts
 ```
@@ -89,8 +87,24 @@ validate_inputs → extract_protocol → normalize_patient → retrieve_evidence
 If the protocol is unreadable, the profile is invalid, or zero criteria are extracted, the run goes to
 `handle_error`. That node writes a structured error, and the failed run is still persisted.
 Missing patient data does not stop a run; the affected criteria are marked UNKNOWN. Each node's
-start, end, status and output summary goes to `agent_execution_logs`, which the status endpoint reads.
-Persistence is idempotent by `run_id`: a retry replaces the child rows instead of duplicating them.
+start, end, status and output summary is recorded on the run (`agent_logs`), which the status endpoint reads.
+Persistence is idempotent by `run_id`: a retry overwrites the previous outcome instead of duplicating it.
+
+**Storage.** There is no database server. Every record (users, trials, protocol documents with their
+extracted criteria, versioned patient profiles, runs) is a JSON document under `DATA_DIR/store/`, and the
+audit trail is an append-only JSON Lines file per user:
+
+```
+backend/data/
+  store/users/<id>.json  trials/  documents/  patients/  runs/  audit/<user_id>.jsonl
+  uploads/<trial_id>/v1.pdf
+  indexes/<trial_id>/<document_id>/
+```
+
+Writes are atomic (temporary file + `os.replace`) and serialized by a process-wide lock, so run the API
+with a single worker. Record ids are UUIDs; any id that is not a plain token is treated as not found, so
+URL input can never reach a path outside the store. To back up or move the data, copy `backend/data/`;
+to start clean, stop the API and delete it.
 
 **LLM use.** Only Agent A calls the LLM by default; it is also used for semantic (non-numeric)
 criteria when configured. Model output must validate against a strict schema. If it doesn't, Agent A falls
@@ -98,7 +112,7 @@ back to the rule-based extractor and a semantic check becomes UNKNOWN. A semanti
 make a patient ELIGIBLE on its own: it yields MORE_INFORMATION_REQUIRED. PDF text is passed as untrusted
 data, and the model is told never to follow instructions inside it.
 
-**Tech stack.** Python 3.12 (the plan specified 3.11; the pinned NumPy 2.5 requires 3.12), FastAPI, Pydantic v2, SQLAlchemy 2, Alembic, LangGraph, PyMuPDF,
+**Tech stack.** Python 3.12 (the plan specified 3.11; the pinned NumPy 2.5 requires 3.12), FastAPI, Pydantic v2, LangGraph, PyMuPDF,
 sentence-transformers + faiss-cpu, python-jose, passlib/bcrypt. Frontend: React 18, TypeScript,
 Vite, Tailwind, React Router, Axios. All versions are pinned (`backend/requirements.txt`, `frontend/package.json`).
 
@@ -106,11 +120,11 @@ Vite, Tailwind, React Router, Axios. All versions are pinned (`backend/requireme
 
 ## Run locally
 
-### Option A: Docker Compose (Postgres + API + UI)
+### Option A: Docker Compose (API + UI)
 
 ```bash
-cp .env.example .env               # optional; defaults work offline
-docker compose up --build
+cp .env.example .env               # then set JWT_SECRET (see the comment in the file)
+docker compose up --build          # data is written to ./backend/data on your machine
 # API  http://localhost:8000/docs     UI  http://localhost:5173
 docker compose exec backend python -m scripts.seed --api-url http://localhost:8000 --analyze
 ```
@@ -123,7 +137,7 @@ cd backend
 python3.12 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 python -m scripts.make_synthetic_protocol          # writes tests/fixtures/*.pdf
-uvicorn app.main:app --reload --port 8000           # runs Alembic migrations on startup (SQLite by default)
+uvicorn app.main:app --reload --port 8000           # stores data in backend/data/
 python -m scripts.seed --api-url http://localhost:8000 --analyze   # demo user + data + the 69/28 run
 
 # frontend (second terminal)
@@ -137,15 +151,8 @@ Demo: log in as `demo@example.org` / `demo-password-123`. Under **New assessment
 **NOT ELIGIBLE** and a renal Silent Exclusion Trigger citing pages 2 and 3; click "p. 2" or "p. 3"
 to see the highlighted excerpt.
 
-### Migrations
-
-```bash
-cd backend
-alembic upgrade head                                   # uses DATABASE_URL
-alembic revision --autogenerate -m "describe change"   # after editing app/models
-```
-
-Set `MIGRATE_ON_STARTUP=false` to manage migrations yourself.
+On Linux, create the data folder before the first `docker compose up` so the container user can write to it:
+`mkdir -p backend/data && sudo chown 10001 backend/data`.
 
 ---
 
@@ -153,10 +160,9 @@ Set `MIGRATE_ON_STARTUP=false` to manage migrations yourself.
 
 | Variable | Default | Notes |
 |---|---|---|
-| `APP_ENV` | `development` | `production` refuses to start without a real `JWT_SECRET` |
-| `DATABASE_URL` | `sqlite:///./data/app.db` | `postgres://` and `postgresql://` URLs are accepted (psycopg 3) |
-| `DATA_DIR` | `./data` | Uploaded PDFs and per-trial FAISS indexes |
-| `JWT_SECRET` | dev placeholder | **Required in production** |
+| `APP_ENV` | `development` | `production` refuses to start without a strong `JWT_SECRET` |
+| `DATA_DIR` | `./data` | All data: JSON records (`store/`), uploaded PDFs, per-trial retrieval indexes |
+| `JWT_SECRET` | dev placeholder | **Required in production**, at least 32 random characters |
 | `JWT_EXPIRE_MINUTES` | `720` | |
 | `FRONTEND_ORIGIN` | `http://localhost:5173` | CORS; comma-separated list |
 | `LLM_PROVIDER` | `none` | `anthropic` \| `openai` \| `none` (offline, rule-based) |
@@ -164,7 +170,6 @@ Set `MIGRATE_ON_STARTUP=false` to manage migrations yourself.
 | `EMBEDDINGS_ENABLED` | `true` | `false` uses the deterministic keyword retriever |
 | `EMBEDDING_MODEL` | `sentence-transformers/all-MiniLM-L6-v2` | |
 | `MAX_UPLOAD_MB` / `STALE_DAYS` | `20` / `90` | |
-| `MIGRATE_ON_STARTUP` | `true` | |
 | `VITE_API_URL` (frontend) | `http://localhost:8000` | Baked in at build time |
 
 Secrets come only from the environment; `.env.example` contains placeholders only.
@@ -192,14 +197,14 @@ Errors always look like `{"error": {"code", "message", "details"}}`. OpenAPI doc
 | GET | `/api/health` | |
 
 Each run is linked to the trial, the protocol version (`v1-<sha256 prefix>`) and the patient profile version.
-Uploads, analysis requests and completions, and every read of results or evidence are written to `audit_events`.
+Uploads, analysis requests and completions, and every read of results or evidence are written to the audit log (`store/audit/`).
 
 ---
 
 ## Tests
 
 ```bash
-cd backend && pytest            # 58 tests, fully offline (LLM_PROVIDER=none, keyword retriever)
+cd backend && pytest            # fully offline (LLM_PROVIDER=none, keyword retriever)
 cd frontend && npm run build    # type-check + production build
 ```
 
@@ -209,7 +214,8 @@ Coverage includes:
 - upload errors: non-PDF and unreadable uploads → 400 structured error, plus the size limit;
 - extraction: ambiguous criterion → review flag, excerpt not on its cited page → flagged, invalid LLM JSON → rule-based fallback or UNKNOWN (no crash);
 - engine: creatinine µmol/L → mg/dL conversion, comparator boundaries (70 inclusive, 30 not below), stale/conflicting/missing flags;
-- security and persistence: user B cannot read user A's trial, patient or run (404), API round-trip with idempotent re-persistence, Alembic upgrade/downgrade;
+- security and persistence: user B cannot read user A's trial, patient or run (404), API round-trip with idempotent re-persistence, path-like ids rejected, security headers;
+- file store (`tests/test_storage.py`): records survive a restart, ownership scoping, atomic concurrent updates, append-only audit log;
 - retrieval: retrieval validation, plus the real FAISS path (skipped when the embedding model can't be loaded offline).
 
 ---
@@ -218,14 +224,13 @@ Coverage includes:
 
 **Render (backend + frontend).** Push the repo, then in Render choose *New → Blueprint* and select `render.yaml`. It
 creates the Docker web service (`backend/Dockerfile`), the frontend static site (built with `VITE_API_URL` pointing at
-the API, with an SPA rewrite) and a Postgres database. `FRONTEND_ORIGIN` already allows the static site; optionally set
+the API, with an SPA rewrite). `FRONTEND_ORIGIN` already allows the static site; optionally set
 `LLM_PROVIDER`/`LLM_API_KEY`. `JWT_SECRET` is generated.
-The blueprint uses Render's free plans: 512 MB RAM, no persistent disk, the service sleeps when idle (first request
-after a sleep takes about a minute) and free Postgres expires after 30 days. Embeddings are therefore off
-(`EMBEDDINGS_ENABLED=false`); the keyword retriever, all agents and page citations work unchanged (peak memory measured at
-about 170 MB). For FAISS + MiniLM retrieval use the `standard` plan, set `EMBEDDINGS_ENABLED=true` and add a disk at
-`/app/data`. Seed the deployment
-with `python -m scripts.seed --api-url https://<render-host> --analyze`.
+The blueprint uses Render's free plans: 512 MB RAM, the service sleeps when idle (first request after a sleep takes
+about a minute) and there is **no persistent disk, so stored data is reset on every restart or deploy**. To keep data,
+move the API to a paid plan and uncomment the `disk` block in `render.yaml` (mounted at `/app/data`). Embeddings are off
+on the free plan (`EMBEDDINGS_ENABLED=false`); the keyword retriever, all agents and page citations work unchanged.
+Seed the deployment with `python -m scripts.seed --api-url https://<render-host> --analyze`.
 
 **Frontend → Vercel (alternative).** Import the repo with root directory `frontend` (framework: Vite) and set
 `VITE_API_URL=https://<render-host>`, then add the Vercel URL to `FRONTEND_ORIGIN` in `render.yaml`.
@@ -238,6 +243,8 @@ with `python -m scripts.seed --api-url https://<render-host> --analyze`.
 - **Scope cut for the 3-day build:** no Redis/queue (FastAPI BackgroundTasks; a run is lost if the process
   restarts mid-run, but a retry is idempotent), no roles or refresh tokens, and no ClinicalBERT/BioBERT
   (numeric rules use deterministic comparators instead).
+- The file store is built for one API process on one machine. Scaling out to several workers or hosts needs a
+  shared database behind the same `Store` interface (`app/storage/file_store.py`).
 - The evidence viewer shows the page text with the excerpt highlighted; it does not render the PDF.
 - The rule-based extractor targets numbered/bulleted criteria with common phrasings ("not below", "at least",
   "≥", ranges, "within N days"). Unusual layouts (tables, multi-column, scanned PDFs) need the LLM path or manual review.

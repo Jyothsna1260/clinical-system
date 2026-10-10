@@ -8,6 +8,7 @@ from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DEV_JWT_SECRET = "dev-only-insecure-secret-change-me"
+MIN_PRODUCTION_SECRET_LENGTH = 32
 
 HUMAN_REVIEW_NOTICE = (
     "Clinical decision support only. This assessment supports, and does not replace, "
@@ -17,12 +18,11 @@ HUMAN_REVIEW_NOTICE = (
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    # The repo-root .env (shared with docker compose) is read first; backend/.env overrides it.
+    model_config = SettingsConfigDict(env_file=("../.env", ".env"), env_file_encoding="utf-8", extra="ignore")
 
     app_env: Literal["development", "test", "production"] = "development"
-    database_url: str = "sqlite:///./data/app.db"
     data_dir: Path = Path("./data")
-    migrate_on_startup: bool = True
 
     jwt_secret: str = DEV_JWT_SECRET
     jwt_algorithm: str = "HS256"
@@ -43,19 +43,20 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _check_production(self) -> "Settings":
-        if self.app_env == "production" and (not self.jwt_secret or self.jwt_secret == DEV_JWT_SECRET):
-            raise ValueError("JWT_SECRET must be set to a strong secret when APP_ENV=production")
+        if not self.jwt_secret and self.app_env != "production":
+            self.jwt_secret = DEV_JWT_SECRET  # blank JWT_SECRET= in a dev .env
+        if self.app_env == "production" and (
+            self.jwt_secret == DEV_JWT_SECRET or len(self.jwt_secret) < MIN_PRODUCTION_SECRET_LENGTH
+        ):
+            raise ValueError(
+                f"JWT_SECRET must be a random string of at least {MIN_PRODUCTION_SECRET_LENGTH} "
+                "characters when APP_ENV=production"
+            )
         return self
 
     @property
-    def sqlalchemy_url(self) -> str:
-        url = self.database_url
-        # Render and Heroku hand out postgres:// URLs; SQLAlchemy 2 needs an explicit driver.
-        if url.startswith("postgres://"):
-            url = "postgresql+psycopg://" + url[len("postgres://"):]
-        elif url.startswith("postgresql://"):
-            url = "postgresql+psycopg://" + url[len("postgresql://"):]
-        return url
+    def is_production(self) -> bool:
+        return self.app_env == "production"
 
     @property
     def llm_enabled(self) -> bool:
@@ -64,6 +65,10 @@ class Settings(BaseSettings):
     @property
     def cors_origins(self) -> list[str]:
         return [o.strip() for o in self.frontend_origin.split(",") if o.strip()]
+
+    @property
+    def store_dir(self) -> Path:
+        return self.data_dir / "store"
 
     @property
     def uploads_dir(self) -> Path:

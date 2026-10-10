@@ -1,4 +1,4 @@
-// Timestamps without an offset come from SQLite-backed deployments and are UTC.
+// Timestamps without an offset are treated as UTC.
 const NAIVE_DATETIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/;
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 

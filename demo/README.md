@@ -63,7 +63,7 @@ The script uses an installed Microsoft Edge by default (`DEMO_BROWSER_CHANNEL=ms
 
 Each run uploads one more copy of the synthetic heart-failure protocol and creates one more
 synthetic walk-in patient. Their names are time-stamped so runs don't collide. To start clean,
-point the backend at a fresh database and re-run the seed.
+stop the backend, delete `backend/data/`, start it again and re-run the seed.
 
 If a step fails, the script saves `output/failure.png`, keeps the partial video and exits non-zero.
 That makes it usable as a smoke test of the whole user journey.

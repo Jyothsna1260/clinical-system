@@ -1,37 +1,22 @@
 services:
-  db:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_USER: cte
-      POSTGRES_PASSWORD: cte-local-only
-      POSTGRES_DB: cte
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U cte -d cte"]
-      interval: 5s
-      retries: 10
-
   backend:
     build: ./backend
     env_file:
       - path: .env
         required: false
     environment:
-      DATABASE_URL: postgresql://cte:cte-local-only@db:5432/cte
       DATA_DIR: /app/data
       FRONTEND_ORIGIN: http://localhost:5173
     ports:
       - "8000:8000"
     volumes:
-      - backend-data:/app/data
-    depends_on:
-      db:
-        condition: service_healthy
+      # All application data (JSON records, uploaded PDFs, retrieval indexes) lives here on your PC.
+      - ./backend/data:/app/data
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
       interval: 10s
       retries: 12
+    restart: unless-stopped
 
   frontend:
     build:
@@ -41,8 +26,6 @@ services:
     ports:
       - "5173:80"
     depends_on:
-      - backend
-
-volumes:
-  pgdata:
-  backend-data:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped

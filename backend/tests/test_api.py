@@ -1,9 +1,5 @@
 """HTTP API: auth, uploads, ownership, background analysis and persistence round-trip."""
 
-import json
-
-from sqlalchemy import func, select
-
 
 def _upload(client, headers, fixture_path, name="protocol_renal.pdf"):
     with open(fixture_path(name), "rb") as fh:
@@ -93,8 +89,8 @@ def test_patient_versioning(client, auth_headers, load_patient):
 
 
 def test_full_analysis_round_trip(client, auth_headers, fixture_path, load_patient):
-    from app.database import SessionLocal
-    from app.models import AgentExecutionLog, CriterionEvaluationRow, EligibilityRun, EvidenceReferenceRow
+    from app.services.analysis import run_analysis
+    from app.storage import get_store
 
     h = auth_headers()
     trial = _upload(client, h, fixture_path)
@@ -127,18 +123,18 @@ def test_full_analysis_round_trip(client, auth_headers, fixture_path, load_patie
     runs = client.get("/api/eligibility", headers=h).json()
     assert runs[0]["run_id"] == run_id and runs[0]["overall_status"] == "NOT_ELIGIBLE"
 
-    # Persistence is idempotent by run_id: re-running the same run never duplicates rows.
-    from app.services.analysis import run_analysis
+    # Persistence is idempotent by run_id: re-running the same run never duplicates records.
+    def counts() -> tuple[int, int, int]:
+        run = get_store().runs.get(run_id)
+        evaluations = run.result["inclusion_results"] + run.result["exclusion_results"]
+        return len(evaluations), sum(len(e["evidence_references"]) for e in evaluations), len(run.agent_logs)
 
-    with SessionLocal() as db:
-        before = db.scalar(select(func.count()).select_from(CriterionEvaluationRow).where(CriterionEvaluationRow.run_id == run_id))
-        ev_before = db.scalar(select(func.count()).select_from(EvidenceReferenceRow).where(EvidenceReferenceRow.run_id == run_id))
+    before = counts()
     run_analysis(run_id)
-    with SessionLocal() as db:
-        assert db.scalar(select(func.count()).select_from(CriterionEvaluationRow).where(CriterionEvaluationRow.run_id == run_id)) == before == 4
-        assert db.scalar(select(func.count()).select_from(EvidenceReferenceRow).where(EvidenceReferenceRow.run_id == run_id)) == ev_before
-        assert db.scalar(select(func.count()).select_from(AgentExecutionLog).where(AgentExecutionLog.run_id == run_id)) == 9
-        assert db.get(EligibilityRun, run_id).overall_status == "NOT_ELIGIBLE"
+    assert counts() == before
+    assert before[0] == 4 and before[2] == 9
+    assert get_store().runs.get(run_id).overall_status == "NOT_ELIGIBLE"
+    assert len(client.get(f"/api/eligibility/{run_id}/evidence", headers=h).json()["evidence"]) == len(evidence)
 
 
 def test_user_b_cannot_read_user_a_records(client, auth_headers, fixture_path, load_patient):
@@ -163,28 +159,17 @@ def test_user_b_cannot_read_user_a_records(client, auth_headers, fixture_path, l
     assert client.get("/api/eligibility", headers=b).json() == []
 
 
-def test_migrations_apply_cleanly(tmp_root, monkeypatch):
-    from alembic import command
-    from alembic.config import Config
-    from pathlib import Path
-    from sqlalchemy import create_engine, inspect
+def test_path_like_ids_are_not_found(client, auth_headers):
+    h = auth_headers()
+    for url in ("/api/trials/..%2F..%2Fusers", "/api/patients/..", "/api/eligibility/a.b/status"):
+        r = client.get(url, headers=h)
+        assert r.status_code == 404, url
 
-    from app.config import get_settings
 
-    url = f"sqlite:///{tmp_root / 'migrated.db'}"
-    monkeypatch.setattr(get_settings(), "database_url", url)
-    root = Path(__file__).resolve().parent.parent
-    cfg = Config(str(root / "alembic.ini"))
-    cfg.set_main_option("script_location", str(root / "alembic"))
-    command.upgrade(cfg, "head")
-    tables = set(inspect(create_engine(url)).get_table_names())
-    assert {
-        "users", "trials", "protocol_documents", "protocol_criteria", "patient_profiles", "patient_observations",
-        "eligibility_runs", "criterion_evaluations", "contradiction_findings", "evidence_references",
-        "agent_execution_logs", "audit_events",
-    } <= tables
-    command.downgrade(cfg, "base")
-    assert "users" not in set(inspect(create_engine(url)).get_table_names())
+def test_security_headers(client):
+    r = client.get("/api/health")
+    assert r.headers["X-Content-Type-Options"] == "nosniff"
+    assert r.headers["X-Frame-Options"] == "DENY"
 
 
 def test_root_redirects_to_docs(client):

@@ -1,9 +1,8 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import RedirectResponse
-from sqlalchemy import text
 
 from app.config import HUMAN_REVIEW_NOTICE, get_settings
-from app.database import SessionLocal
+from app.storage import Store, get_store
 
 router = APIRouter(tags=["health"])
 
@@ -15,17 +14,12 @@ def root() -> RedirectResponse:
 
 
 @router.get("/api/health")
-def health() -> dict:
+def health(store: Store = Depends(get_store)) -> dict:
     s = get_settings()
-    db_ok = True
-    try:
-        with SessionLocal() as db:
-            db.execute(text("SELECT 1"))
-    except Exception:
-        db_ok = False
+    storage_ok = store.is_writable()
     return {
-        "status": "ok" if db_ok else "degraded",
-        "database": "ok" if db_ok else "unavailable",
+        "status": "ok" if storage_ok else "degraded",
+        "storage": "ok" if storage_ok else "unavailable",
         "llm_provider": s.llm_provider if s.llm_enabled else "none (rule-based fallback)",
         "embeddings_enabled": s.embeddings_enabled,
         "human_review_notice": HUMAN_REVIEW_NOTICE,

@@ -24,9 +24,9 @@ RUN python -m scripts.make_synthetic_protocol \
 USER app
 
 ENV DATA_DIR=/app/data \
-    DATABASE_URL=sqlite:////app/data/app.db \
     PORT=8000
 EXPOSE 8000
+VOLUME ["/app/data"]
 
-# Migrations run on startup (MIGRATE_ON_STARTUP=true by default).
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT} --proxy-headers --forwarded-allow-ips='*'"]
+# One worker: the file store serializes writes within a single process.
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT} --workers 1 --proxy-headers --forwarded-allow-ips='*'"]
