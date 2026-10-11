@@ -35,7 +35,7 @@ def require_trial(store: Store, trial_id: str, owner_id: str) -> TrialRecord:
 
 
 def latest_document(store: Store, trial: TrialRecord) -> ProtocolDocumentRecord | None:
-    return store.documents.first(lambda d: d.trial_id == trial.id and d.version == trial.current_version)
+    return next((d for d in store.documents.where(trial_id=trial.id) if d.version == trial.current_version), None)
 
 
 def load_criteria(doc: ProtocolDocumentRecord | None) -> list[Criterion]:
@@ -114,8 +114,8 @@ def upload_protocol(
         trial.status = "error"
         trial.error = {"code": "NO_CRITERIA", "message": "No inclusion or exclusion criteria were found in the protocol."}
 
+    store.trials.put(trial)  # the trial first: in PostgreSQL the document references it
     store.documents.put(doc)
-    store.trials.put(trial)
     audit.record(store, owner_id, "trial.uploaded", "trial", trial.id,
                  {"filename": name, "sha256": doc.sha256, "pages": doc.page_count})
     return trial, doc

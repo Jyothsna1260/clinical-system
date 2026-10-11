@@ -1,10 +1,25 @@
-# Render Blueprint: backend web service and frontend static site.
+# Render Blueprint: backend API, PostgreSQL database and Redis-compatible Key Value store.
+# The frontend is deployed to Vercel (see README, "Deploy"); a Render static site is kept as an alternative.
 #
-# All data is stored as files under DATA_DIR. Render's free plan has no persistent disk, so data is
-# reset whenever the service restarts or redeploys. To keep data, switch the API to `plan: starter`
-# (or higher) and uncomment the `disk` block. Embeddings are off on the free plan (512 MB RAM); the
-# keyword retriever is used and agents and page citations are unchanged.
+# Records (users, trials, criteria, patient versions, runs, audit trail) live in PostgreSQL, so they
+# survive restarts and redeploys. Live workflow state lives in Key Value (Redis). Uploaded PDF files and
+# retrieval indexes stay on the service's local disk: on the free plan they are lost on restart, but the
+# extracted page text and criteria are in PostgreSQL, so analyses and evidence pages keep working and
+# indexes are rebuilt on demand. Render's free PostgreSQL expires 30 days after creation; upgrade the
+# database plan to keep it longer. Embeddings are off on the free plan (512 MB RAM).
+databases:
+  - name: cte-system-db
+    plan: free
+    databaseName: cte
+    user: cte
+
 services:
+  - type: keyvalue
+    name: cte-system-state
+    plan: free
+    ipAllowList: []           # internal connections only
+    maxmemoryPolicy: allkeys-lru
+
   - type: web
     name: cte-system-api
     runtime: docker
@@ -12,26 +27,40 @@ services:
     dockerfilePath: ./Dockerfile
     plan: free
     healthCheckPath: /api/health
-    # disk:
-    #   name: cte-data
-    #   mountPath: /app/data
-    #   sizeGB: 1
     envVars:
       - key: APP_ENV
         value: production
       - key: JWT_SECRET
         generateValue: true
-      - key: FRONTEND_ORIGIN    # comma-separated; add a Vercel URL here if you also deploy there
-        value: https://cte-system-app.onrender.com,http://localhost:5173
+      - key: DATABASE_URL
+        fromDatabase:
+          name: cte-system-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: cte-system-state
+          property: connectionString
+      - key: FRONTEND_ORIGIN    # comma-separated exact origins; put your Vercel production URL first
+        value: https://cte-system.vercel.app,https://cte-system-app.onrender.com,http://localhost:5173
+      - key: FRONTEND_ORIGIN_REGEX  # Vercel preview deployments of the same project
+        value: https://cte-system(-[a-z0-9-]+)?\.vercel\.app
       - key: LLM_PROVIDER
         value: gemini
       - key: LLM_API_KEY
         sync: false
+      - key: WEB_SEARCH_PROVIDER
+        value: tavily
+      - key: WEB_SEARCH_API_KEY   # optional; without it the web research step is skipped
+        sync: false
       - key: EMBEDDINGS_ENABLED
+        value: "false"
+      - key: CLINICAL_NLP_ENABLED  # BioBERT needs ~1 GB RAM; enable on a Standard plan or larger
         value: "false"
       - key: DATA_DIR
         value: /app/data
 
+  # Alternative to Vercel: the frontend as a Render static site.
   - type: web
     name: cte-system-app
     runtime: static

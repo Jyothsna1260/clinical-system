@@ -11,9 +11,11 @@ backend   api/routes/     HTTP only: parse the request, call one service functio
             │
           services/       one module per use case: auth, trials, patients, eligibility, analysis (background)
             │
-            ├── storage/    file store: typed records saved as JSON under DATA_DIR/store
+            ├── storage/    PostgreSQL (DATABASE_URL) or the JSON file store; same interface
+            ├── state/      live workflow state: Redis (REDIS_URL) or in-process memory
             ├── workflow/   LangGraph graph that runs the agents in order
-            │     └── agents/  A–F, using engine/ (rules, units, dates) and rag/ (PDF, chunks, index)
+            │     └── agents/  A–F + web research, using engine/ (rules, units, dates), rag/ (PDF, chunks,
+            │                  index) and nlp/ (optional BioBERT concept matching)
             └── security/   password hashing, JWT tokens, current-user dependency
 ```
 
@@ -26,7 +28,8 @@ Rules that keep the flow clear:
   A record owned by someone else returns the same 404 as a missing one.
 - **Every service that reads or changes data writes an audit event** (`services/audit.py`).
 - **Agents are pure.** They take inputs and return results; the workflow passes in the LLM client, index,
-  progress reporter and persister through `config["configurable"]`.
+  clinical NLP matcher, web search client, prior-assessment memory, progress reporter and persister through
+  `config["configurable"]`.
 
 ## Flow 1: sign in
 
@@ -72,9 +75,10 @@ AssessmentLauncher → client.analyze() → POST /api/eligibility/analyze
        workflow.graph.run_eligibility():
          validate_inputs → extract_protocol → normalize_patient (Agent B) → retrieve_evidence
            → [inclusion_matching (C) ∥ exclusion_detection (D)] → detect_contradictions (E)
-           → review_and_decide (F) → persist
-       each node reports progress → RunRecord.agent_logs
+           → web_research → review_and_decide (F) → persist
+       each node reports progress → workflow state (Redis or memory, app/state/)
        persist → RunRecord.result / error, audit "analysis.completed" or "analysis.failed"
+       at the end, the live agent state is copied into RunRecord.agent_logs (durable)
 
 Analysis.tsx polls GET /api/eligibility/{run_id}/status until done, then opens Results.tsx,
 which loads GET /{run_id}, /{run_id}/evidence and /{run_id}/audit.
@@ -84,6 +88,18 @@ Any failure inside a node becomes a structured error and goes to `handle_error`,
 `persist`, so a failed run is always recorded and shown.
 
 ## Where the data lives
+
+With `DATABASE_URL` set, records live in PostgreSQL (`app/storage/postgres_store.py`). Each record type has
+its own table (`users`, `trials`, `protocol_documents`, `patients`, `eligibility_runs`, `audit_events`) with
+the lookup and ownership columns as real indexed columns and foreign keys, and the full validated record in a
+`data` JSONB column. The schema is created on startup. `update()` uses `SELECT … FOR UPDATE`, so the
+parallel agents and several API workers never lose writes.
+
+With `REDIS_URL` set, live per-agent progress is kept in Redis (`cte:run:<run_id>:nodes`, expires after
+`RUN_STATE_TTL_SECONDS`). The status endpoint overlays it on the durable agent logs. If Redis becomes
+unreachable mid-run, progress falls back to process memory and the run continues.
+
+Without `DATABASE_URL`, the file store is used:
 
 ```
 DATA_DIR/                     (backend/data locally, /app/data in Docker and on Render)
@@ -107,6 +123,9 @@ DATA_DIR/                     (backend/data locally, /app/data in Docker and on 
 | How a rule is compared (thresholds, units, dates) | `backend/app/engine/` |
 | The final ELIGIBLE / NOT_ELIGIBLE decision | `backend/app/agents/reviewer.py` |
 | Order of the agents | `backend/app/workflow/graph.py` |
-| How records are saved | `backend/app/storage/` |
+| How records are saved | `backend/app/storage/` (`file_store.py`, `postgres_store.py`) |
+| Live workflow state | `backend/app/state/run_state.py` |
+| Clinical NLP (BioBERT) matching | `backend/app/nlp/clinical.py`, used in `engine/rule_evaluator.py` |
+| Web search for ambiguous criteria | `backend/app/services/web_search.py`, `backend/app/agents/web_research.py` |
 | A screen | `frontend/src/pages/`, shared pieces in `frontend/src/components/` |
 | An API call from the UI | `frontend/src/api/client.ts`, types in `frontend/src/types.ts` |

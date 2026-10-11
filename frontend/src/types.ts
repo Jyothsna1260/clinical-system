@@ -176,6 +176,36 @@ export interface DecisiveEvidence {
   evidence_references: EvidenceReference[];
 }
 
+export interface PatientValueUsed {
+  attribute: string;
+  label: string;
+  value: string;
+  observed_at: string | null;
+  status: string;
+  source: string | null;
+  criterion_ids: string[];
+}
+
+/** Web search context for an ambiguous criterion. Never used in the decision. */
+export interface ExternalReference {
+  criterion_id: string;
+  query: string;
+  title: string;
+  url: string;
+  snippet: string;
+  provider: string;
+}
+
+/** Persistent memory: the previous assessment of the same patient for the same trial. */
+export interface PriorAssessment {
+  run_id: string;
+  overall_status: OverallStatus | null;
+  analyzed_at: ISODateTime | null;
+  patient_profile_version: number;
+  protocol_version: string;
+  changed_criteria: string[];
+}
+
 export interface EligibilityResult {
   run_id: string;
   overall_status: OverallStatus;
@@ -191,6 +221,10 @@ export interface EligibilityResult {
   protocol_version: string;
   analyzed_at: ISODateTime;
   reviewer_notes: string[];
+  // Optional: absent on results saved before these fields existed.
+  patient_values_used?: PatientValueUsed[];
+  external_references?: ExternalReference[];
+  prior_assessment?: PriorAssessment | null;
 }
 
 // ------------------------------------------------------------------ API

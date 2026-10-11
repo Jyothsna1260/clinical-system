@@ -9,6 +9,7 @@ from app.schemas.clinical import (
     CriterionEvaluation,
     EligibilityResult,
     EvidenceReference,
+    ExternalReference,
     NormalizedProfile,
     PatientProfileInput,
 )
@@ -21,6 +22,7 @@ NODE_ORDER = [
     "inclusion_matching",
     "exclusion_detection",
     "detect_contradictions",
+    "web_research",
     "review_and_decide",
     "persist",
 ]
@@ -55,6 +57,8 @@ class EligibilityState(TypedDict, total=False):
     contradictions: ContradictionReport
     extraction_method: str
     extraction_warnings: list[str]
+    external_references: list[ExternalReference]
+    research_warnings: list[str]
     # outputs
     result: EligibilityResult
     error: Annotated[WorkflowError | None, keep_first]

@@ -2,12 +2,12 @@
 
 validate_inputs -> extract_protocol -> normalize_patient -> retrieve_evidence
   -> [inclusion_matching || exclusion_detection] -> detect_contradictions
-  -> review_and_decide -> persist -> END
+  -> web_research -> review_and_decide -> persist -> END
 
 Invalid/unreadable input or zero extracted criteria routes to `handle_error`, which
 returns a structured error and still goes through `persist` so the run is recorded.
-Runtime dependencies (LLM client, index provider, progress reporter, persister) are
-passed via `config["configurable"]` so the graph itself stays pure and testable.
+Runtime dependencies (LLM client, index provider, clinical NLP matcher, web search client,
+prior-assessment memory, progress reporter, persister) are passed via `config["configurable"]` so the graph itself stays pure and testable.
 """
 
 import logging
@@ -26,7 +26,8 @@ from app.agents.exclusion_detection import detect_exclusions
 from app.agents.inclusion_matching import match_inclusion
 from app.agents.patient_profile import normalize_patient
 from app.agents.protocol_extraction import excerpt_on_page, extract_criteria
-from app.agents.reviewer import review_and_decide
+from app.agents.reviewer import compare_with_prior, patient_values_used, review_and_decide
+from app.agents.web_research import research_ambiguous_criteria
 from app.rag.chunker import chunk_pages
 from app.rag.index import KeywordIndex
 from app.rag.pdf_loader import pages_from_dicts
@@ -160,13 +161,15 @@ def _status_counts(evals) -> dict[str, int]:
 
 @node("inclusion_matching")
 def inclusion_node(state: EligibilityState, config: RunnableConfig | None) -> tuple[dict, dict]:
-    results = match_inclusion(state["criteria"], state["profile"], state["evidence"], _cfg(config, "llm"))
+    results = match_inclusion(state["criteria"], state["profile"], state["evidence"], _cfg(config, "llm"),
+                              _cfg(config, "concept_matcher"))
     return {"inclusion_results": results}, _status_counts(results)
 
 
 @node("exclusion_detection")
 def exclusion_node(state: EligibilityState, config: RunnableConfig | None) -> tuple[dict, dict]:
-    results = detect_exclusions(state["criteria"], state["profile"], state["evidence"], _cfg(config, "llm"))
+    results = detect_exclusions(state["criteria"], state["profile"], state["evidence"], _cfg(config, "llm"),
+                                _cfg(config, "concept_matcher"))
     return {"exclusion_results": results}, _status_counts(results)
 
 
@@ -180,6 +183,21 @@ def contradictions_node(state: EligibilityState, config: RunnableConfig | None) 
     }
 
 
+@node("web_research")
+def web_research_node(state: EligibilityState, config: RunnableConfig | None) -> tuple[dict, dict]:
+    client = _cfg(config, "web_search")
+    refs, warnings = research_ambiguous_criteria(
+        state["criteria"], state["inclusion_results"] + state["exclusion_results"], client,
+        _cfg(config, "web_search_max_queries", 3),
+    )
+    return {"external_references": refs, "research_warnings": warnings}, {
+        "enabled": client is not None,
+        "provider": getattr(client, "provider", None),
+        "references": len(refs),
+        "criteria": sorted({r.criterion_id for r in refs}),
+    }
+
+
 @node("review_and_decide")
 def review_node(state: EligibilityState, config: RunnableConfig | None) -> tuple[dict, dict]:
     result = review_and_decide(
@@ -189,7 +207,16 @@ def review_node(state: EligibilityState, config: RunnableConfig | None) -> tuple
         exclusion_results=state["exclusion_results"],
         report=state["contradictions"],
     )
-    return {"result": result}, {"overall_status": result.overall_status, "decisive": len(result.decisive_evidence)}
+    evaluations = result.inclusion_results + result.exclusion_results
+    memory, memory_notes = compare_with_prior(_cfg(config, "prior_assessment"), result.overall_status, evaluations)
+    result = result.model_copy(update={
+        "patient_values_used": patient_values_used(state["profile"], evaluations),
+        "external_references": state.get("external_references") or [],
+        "prior_assessment": memory,
+        "reviewer_notes": result.reviewer_notes + memory_notes + (state.get("research_warnings") or []),
+    })
+    return {"result": result}, {"overall_status": result.overall_status, "decisive": len(result.decisive_evidence),
+                                "compared_with_prior": memory is not None}
 
 
 @node("handle_error", always=True)
@@ -224,6 +251,7 @@ def build_graph():
     g.add_node("inclusion_matching", inclusion_node)
     g.add_node("exclusion_detection", exclusion_node)
     g.add_node("detect_contradictions", contradictions_node)
+    g.add_node("web_research", web_research_node)
     g.add_node("review_and_decide", review_node)
     g.add_node("handle_error", handle_error)
     g.add_node("persist", persist)
@@ -235,7 +263,8 @@ def build_graph():
     g.add_edge("retrieve_evidence", "inclusion_matching")
     g.add_edge("retrieve_evidence", "exclusion_detection")
     g.add_edge(["inclusion_matching", "exclusion_detection"], "detect_contradictions")
-    g.add_conditional_edges("detect_contradictions", _after("review_and_decide"), ["review_and_decide", "handle_error"])
+    g.add_conditional_edges("detect_contradictions", _after("web_research"), ["web_research", "handle_error"])
+    g.add_conditional_edges("web_research", _after("review_and_decide"), ["review_and_decide", "handle_error"])
     g.add_conditional_edges("review_and_decide", _after("persist"), ["persist", "handle_error"])
     g.add_edge("handle_error", "persist")
     g.add_edge("persist", END)
@@ -256,6 +285,10 @@ def run_eligibility(
     reporter: Reporter | None = None,
     persister=None,
     stale_days: int = 90,
+    concept_matcher=None,
+    web_search=None,
+    web_search_max_queries: int = 3,
+    prior_assessment: dict | None = None,
 ) -> EligibilityState:
     state: EligibilityState = {
         "run_id": run_id,
@@ -271,6 +304,8 @@ def run_eligibility(
         state["criteria"] = criteria
     config = {"configurable": {
         "llm": llm, "index_provider": index_provider, "reporter": reporter,
-        "persister": persister, "stale_days": stale_days,
+        "persister": persister, "stale_days": stale_days, "concept_matcher": concept_matcher,
+        "web_search": web_search, "web_search_max_queries": web_search_max_queries,
+        "prior_assessment": prior_assessment,
     }}
     return build_graph().invoke(state, config=config)

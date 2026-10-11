@@ -15,6 +15,11 @@ langchain-core==1.6.9
 anthropic==1.12.1
 httpx==0.28.1
 
+# Storage and workflow state (PostgreSQL when DATABASE_URL is set; Redis when REDIS_URL is set)
+psycopg[binary]==3.3.6
+psycopg-pool==3.3.3
+redis==8.1.0
+
 # Documents and retrieval
 pymupdf==1.28.2
 numpy==2.5.3
@@ -30,3 +35,4 @@ bcrypt==4.0.1
 # Fixtures and tests
 reportlab==5.0.1
 pytest==9.1.1
+fakeredis==2.39.0

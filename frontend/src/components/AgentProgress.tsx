@@ -10,6 +10,7 @@ export const NODE_LABELS: Record<string, { label: string; description: string }>
   inclusion_matching: { label: "Inclusion matching", description: "Evaluates every inclusion criterion." },
   exclusion_detection: { label: "Exclusion detection", description: "Evaluates every exclusion criterion." },
   detect_contradictions: { label: "Detect contradictions", description: "Looks for silent exclusion triggers and conflicts." },
+  web_research: { label: "Web research", description: "Looks up external definitions for ambiguous criteria (protocol wording only, never patient data)." },
   review_and_decide: { label: "Review and decide", description: "Combines findings into an overall recommendation." },
   persist: { label: "Save results", description: "Stores the result, evidence and audit trail." },
 };

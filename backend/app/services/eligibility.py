@@ -9,7 +9,8 @@ from app.schemas.api import NodeProgress, RunDetail, RunStatus, RunSummary
 from app.services import audit
 from app.services.patients import require_patient
 from app.services.trials import latest_document, require_trial
-from app.storage import RunRecord, Store
+from app.state import get_run_state
+from app.storage import AgentLog, RunRecord, Store
 from app.workflow.state import NODE_ORDER
 
 
@@ -61,11 +62,16 @@ def list_runs(store: Store, owner_id: str, limit: int) -> list[RunSummary]:
 
 
 def run_status(store: Store, run_id: str, owner_id: str) -> RunStatus:
+    """Per-agent progress: the durable agent logs, overlaid with the live workflow state while it exists."""
     run = require_run(store, run_id, owner_id)
-    nodes = NODE_ORDER + [n for n in run.agent_logs if n not in NODE_ORDER]
+    live = {name: AgentLog(node=name, status=e.get("status", "unknown"), started_at=e.get("started_at"),
+                           ended_at=e.get("ended_at"), summary=e.get("summary"))
+            for name, e in get_run_state().nodes(run.id).items()}
+    logs = {**run.agent_logs, **live}
+    nodes = NODE_ORDER + [n for n in logs if n not in NODE_ORDER]
     progress = []
     for name in nodes:
-        entry = run.agent_logs.get(name)
+        entry = logs.get(name)
         progress.append(
             NodeProgress(node=name, status="pending") if entry is None
             else NodeProgress(node=name, status=entry.status, started_at=entry.started_at,
