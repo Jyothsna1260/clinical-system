@@ -88,7 +88,7 @@ contradictions, review and decide, then save. When it finishes, the results page
 
 - **Verdict:** the overall recommendation, with counts of inclusion criteria met, exclusions
   triggered, unknowns and silent triggers, plus a plain-language explanation.
-- **Section bar:** jump to Triggers, Inclusion, Exclusion, Missing info, Evidence or Audit trail.
+- **Section bar:** jump to Silent triggers, Triggered exclusions, Inclusion, Exclusion, Patient values, Missing info, Protocol evidence or Audit trail. When the same patient was assessed for the same trial before, a "Compared with previous assessment" panel lists what changed; with web search enabled, "External references" shows definitions found for ambiguous wording (context only).
   It stays pinned while you scroll.
 - **Silent exclusion triggers:** hidden contradictions, for example a patient who passes
   inclusion but whose findings point to an exclusion the protocol never defines numerically.
