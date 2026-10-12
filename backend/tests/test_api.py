@@ -132,7 +132,7 @@ def test_full_analysis_round_trip(client, auth_headers, fixture_path, load_patie
     before = counts()
     run_analysis(run_id)
     assert counts() == before
-    assert before[0] == 4 and before[2] == 9
+    assert before[0] == 4 and before[2] == 10
     assert get_store().runs.get(run_id).overall_status == "NOT_ELIGIBLE"
     assert len(client.get(f"/api/eligibility/{run_id}/evidence", headers=h).json()["evidence"]) == len(evidence)
 

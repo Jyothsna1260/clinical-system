@@ -115,6 +115,10 @@ class Collection(Generic[R]):
     def first(self, predicate: Callable[[R], bool]) -> R | None:
         return next((r for r in self if predicate(r)), None)
 
+    def where(self, **equals) -> list[R]:
+        """Records whose fields equal the given values (indexed columns in the PostgreSQL store)."""
+        return self.find(lambda r: all(getattr(r, k) == v for k, v in equals.items()))
+
 
 class OwnedCollection(Collection[R]):
     """Collection whose records belong to a user; lookups by another user see nothing."""
@@ -156,6 +160,8 @@ class AuditLog:
 
 class Store:
     """All persisted application data, rooted at one directory on local disk."""
+
+    kind = "file"
 
     def __init__(self, root: Path):
         self.root = root

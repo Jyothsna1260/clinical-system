@@ -231,6 +231,40 @@ class DecisiveEvidence(StrictModel):
     evidence_references: list[EvidenceReference]
 
 
+class PatientValueUsed(StrictModel):
+    """A patient value the agents compared against the protocol, with its normalization trace."""
+
+    attribute: str
+    label: str
+    value: str
+    observed_at: date | None = None
+    status: str = "ok"
+    source: str | None = None  # e.g. "Creatinine 132.6 umol/L (converted)"
+    criterion_ids: list[str] = Field(default_factory=list)
+
+
+class ExternalReference(StrictModel):
+    """Web search context for an ambiguous criterion. Shown to the reviewer; never used in the decision."""
+
+    criterion_id: str
+    query: str
+    title: str
+    url: str
+    snippet: str = ""
+    provider: str
+
+
+class PriorAssessment(StrictModel):
+    """Persistent agent memory: the previous assessment of the same patient for the same trial."""
+
+    run_id: str
+    overall_status: str | None
+    analyzed_at: datetime | None = None
+    patient_profile_version: int
+    protocol_version: str
+    changed_criteria: list[str] = Field(default_factory=list)
+
+
 class EligibilityResult(StrictModel):
     run_id: str
     overall_status: OverallStatus
@@ -246,6 +280,9 @@ class EligibilityResult(StrictModel):
     protocol_version: str
     analyzed_at: datetime
     reviewer_notes: list[str] = Field(default_factory=list)
+    patient_values_used: list[PatientValueUsed] = Field(default_factory=list)
+    external_references: list[ExternalReference] = Field(default_factory=list)
+    prior_assessment: PriorAssessment | None = None
 
     @field_validator("inclusion_results")
     @classmethod

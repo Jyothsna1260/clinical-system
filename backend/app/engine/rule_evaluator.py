@@ -23,6 +23,7 @@ from app.engine.vocabulary import (
     label,
     normalize_text,
 )
+from app.nlp.clinical import ConceptMatcher
 from app.schemas.clinical import Criterion, NormalizedProfile
 from app.services.llm import UNTRUSTED_DATA_RULE, LLMClient, LLMError
 
@@ -139,7 +140,30 @@ def _term_status(term: str, profile: NormalizedProfile) -> tuple[bool | None, st
     return None, f"'{term}' is neither documented nor explicitly recorded as absent"
 
 
-def _evaluate_condition(criterion: Criterion, profile: NormalizedProfile) -> RuleOutcome:
+def _possible_matches(terms: list[str], profile: NormalizedProfile,
+                      matcher: ConceptMatcher | None) -> list[str]:
+    """Clinical-NLP notes for patient records that may correspond to an unresolved condition term."""
+    if matcher is None:
+        return []
+    records = {dx.name: f"documented diagnosis '{dx.name}'" for dx in profile.diagnoses}
+    records.update({h.condition: f"history item '{h.condition}'" for h in profile.history if h.present is not False})
+    notes = []
+    for term in terms:
+        try:
+            hits = matcher.similar(term, list(records))
+        except Exception as exc:  # the matcher is advisory; never fail an evaluation over it
+            log.warning("clinical NLP matching failed for %r: %s", term, exc)
+            return []
+        for name, score in hits[:2]:
+            notes.append(
+                f"Clinical NLP ({matcher.name}, similarity {score:.2f}): {records[name]} may correspond to "
+                f"'{term}'. Not used to decide; requires clinical confirmation."
+            )
+    return notes
+
+
+def _evaluate_condition(criterion: Criterion, profile: NormalizedProfile,
+                        matcher: ConceptMatcher | None = None) -> RuleOutcome:
     rule = criterion.normalized_rule
     assert rule is not None
     terms = rule.value if isinstance(rule.value, list) else [str(rule.value)]
@@ -179,6 +203,10 @@ def _evaluate_condition(criterion: Criterion, profile: NormalizedProfile) -> Rul
             f"(patient {values})."
         )
         notes.append(f"{name[:1].upper() + name[1:]} is not confirmed by {labs} alone.")
+    nlp_notes = _possible_matches(terms, profile, matcher)
+    if nlp_notes:
+        explanation += " A clinical language model flagged possibly related records for review (see notes)."
+        notes.extend(nlp_notes)
     return RuleOutcome(None, patient_value, expected, "not_evaluable", explanation, notes, "condition")
 
 
@@ -274,14 +302,15 @@ def _evaluate_semantic(criterion: Criterion, profile: NormalizedProfile, llm: LL
                        ["Semantic model judgement; requires human confirmation."])
 
 
-def evaluate_criterion(criterion: Criterion, profile: NormalizedProfile, llm: LLMClient | None = None) -> RuleOutcome:
+def evaluate_criterion(criterion: Criterion, profile: NormalizedProfile, llm: LLMClient | None = None,
+                       concept_matcher: ConceptMatcher | None = None) -> RuleOutcome:
     rule = criterion.normalized_rule
     if rule is None:
         return _evaluate_semantic(criterion, profile, llm)
     if rule.attribute == "data_completeness":
         return _evaluate_data_completeness(criterion, profile)
     if rule.attribute == "condition" and rule.operator in {"present", "absent"}:
-        return _evaluate_condition(criterion, profile)
+        return _evaluate_condition(criterion, profile, concept_matcher)
     if rule.operator == "within_days" and rule.attribute.startswith("event:"):
         return _evaluate_event(criterion, profile)
     if rule.operator in {"gt", "gte", "lt", "lte", "eq", "between"}:

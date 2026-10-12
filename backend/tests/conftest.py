@@ -1,4 +1,7 @@
-"""Test configuration: fully offline (no LLM, keyword retriever), isolated file store."""
+"""Test configuration: fully offline (no LLM, keyword retriever), isolated file store.
+
+Set TEST_DATABASE_URL to run the whole suite (API tests included) against PostgreSQL instead.
+"""
 
 import json
 import os
@@ -14,6 +17,10 @@ os.environ.update({
     "LLM_API_KEY": "",
     "EMBEDDINGS_ENABLED": "false",
     "JWT_SECRET": "test-secret",
+    "DATABASE_URL": os.environ.get("TEST_DATABASE_URL", ""),
+    "REDIS_URL": "",
+    "WEB_SEARCH_PROVIDER": "none",
+    "CLINICAL_NLP_ENABLED": "false",
 })
 
 import pytest  # noqa: E402
@@ -86,8 +93,14 @@ def client():
     from app.main import app
     from app.storage import reset_store
 
+    from app.state import reset_run_state
+    from app.storage import get_store
+
     shutil.rmtree(get_settings().data_dir, ignore_errors=True)
     reset_store()
+    reset_run_state()
+    if get_settings().database_url:
+        get_store().truncate_all()
     with TestClient(app) as c:
         yield c
 

@@ -11,7 +11,7 @@ import { ReviewNotice } from "../components/ReviewNotice";
 import { SilentExclusionCard } from "../components/SilentExclusionCard";
 import { EmptyState, ErrorState, LoadingState } from "../components/States";
 import { OverallStatusBadge, StatusBadge } from "../components/StatusBadge";
-import { formatDateTime, formatValue, humanize } from "../lib/format";
+import { formatDate, formatDateTime, formatValue, humanize } from "../lib/format";
 import { useAsync } from "../lib/useAsync";
 import type { CriterionEvaluation, EligibilityResult } from "../types";
 
@@ -49,11 +49,13 @@ function Metric({ label, value, total, tone }: { label: string; value: number; t
 
 function SectionNav({ r }: { r: EligibilityResult }) {
   const links = [
-    { href: "#set-h", label: "Triggers", n: r.silent_exclusion_triggers.length },
+    { href: "#set-h", label: "Silent triggers", n: r.silent_exclusion_triggers.length },
+    { href: "#triggered-h", label: "Triggered exclusions", n: countBy(r.exclusion_results, "TRIGGERED") },
     { href: "#inclusion-criteria", label: "Inclusion", n: r.inclusion_results.length },
     { href: "#exclusion-criteria", label: "Exclusion", n: r.exclusion_results.length },
+    { href: "#values-h", label: "Patient values", n: (r.patient_values_used ?? []).length },
     { href: "#missing-h", label: "Missing info", n: r.missing_information.length },
-    { href: "#decisive-h", label: "Evidence", n: r.decisive_evidence.length },
+    { href: "#decisive-h", label: "Protocol evidence", n: r.decisive_evidence.length },
     { href: "#audit", label: "Audit trail" },
   ];
   return (
@@ -135,6 +137,9 @@ export default function Results() {
   }
 
   const notice = r.human_review_notice || d.human_review_notice;
+  const triggered = r.exclusion_results.filter((e) => e.status === "TRIGGERED");
+  const valuesUsed = r.patient_values_used ?? [];
+  const externalRefs = r.external_references ?? [];
   const verdict = VERDICT[r.overall_status] ?? MORE_INFO_VERDICT;
 
   return (
@@ -218,8 +223,67 @@ export default function Results() {
         )}
       </Panel>
 
+      <Panel id="triggered-h" title="Triggered exclusions" count={triggered.length}>
+        {triggered.length === 0 ? (
+          <p className="text-sm text-slate-600">No exclusion criterion was triggered.</p>
+        ) : (
+          <ul className="space-y-3 text-sm">
+            {triggered.map((e) => (
+              <li key={e.criterion_id} className="rounded-md border border-red-300 bg-red-50 p-3 text-red-950">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-mono text-xs font-semibold">{e.criterion_id}</span>
+                  <StatusBadge status={e.status} />
+                </div>
+                <p className="mt-1 font-medium">{e.original_text}</p>
+                <p className="mt-1">
+                  <span className="font-semibold">Patient value:</span> {e.patient_value ?? "Not available"}
+                </p>
+                <p className="mt-1">{e.explanation}</p>
+                <div className="mt-2">
+                  <EvidenceLinks refs={e.evidence_references} context={e.criterion_id} onOpen={openEvidence} />
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Panel>
+
       <CriteriaTable title="Inclusion criteria" evaluations={r.inclusion_results} onOpenEvidence={openEvidence} />
       <CriteriaTable title="Exclusion criteria" evaluations={r.exclusion_results} onOpenEvidence={openEvidence} />
+
+      <Panel id="values-h" title="Patient values used" count={valuesUsed.length}>
+        {valuesUsed.length === 0 ? (
+          <p className="text-sm text-slate-600">No patient values were recorded for this result.</p>
+        ) : (
+          <div className="-mx-4 overflow-x-auto sm:mx-0">
+            <table className="w-full min-w-[36rem] text-left text-sm">
+              <thead className="text-xs uppercase text-slate-600">
+                <tr>
+                  <th scope="col" className="px-4 py-2 sm:pl-0">Attribute</th>
+                  <th scope="col" className="px-4 py-2">Value used</th>
+                  <th scope="col" className="px-4 py-2">Observed</th>
+                  <th scope="col" className="px-4 py-2">Source (as entered)</th>
+                  <th scope="col" className="px-4 py-2">Criteria</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200">
+                {valuesUsed.map((v, i) => (
+                  <tr key={`${v.attribute}-${i}`}>
+                    <td className="px-4 py-2 font-medium sm:pl-0">{v.label}</td>
+                    <td className="px-4 py-2">
+                      {v.value}
+                      {v.status !== "ok" ? <span className="ml-2 rounded bg-amber-100 px-1.5 text-xs text-amber-900">{humanize(v.status)}</span> : null}
+                    </td>
+                    <td className="px-4 py-2 text-slate-600">{v.observed_at ? formatDate(v.observed_at) : "—"}</td>
+                    <td className="px-4 py-2 text-slate-600">{v.source ?? "—"}</td>
+                    <td className="px-4 py-2 font-mono text-xs">{v.criterion_ids.length > 0 ? v.criterion_ids.join(", ") : "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Panel>
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Panel id="missing-h" title="Missing information" count={r.missing_information.length}>
@@ -256,6 +320,26 @@ export default function Results() {
         </Panel>
       </div>
 
+      {r.prior_assessment ? (
+        <Panel id="memory-h" title="Compared with previous assessment">
+          <p className="text-sm text-slate-800">
+            The previous assessment of this patient for this trial (profile version {r.prior_assessment.patient_profile_version}
+            {r.prior_assessment.analyzed_at ? `, ${formatDateTime(r.prior_assessment.analyzed_at)}` : ""}) was{" "}
+            <span className="font-semibold">{humanize(r.prior_assessment.overall_status ?? "unknown")}</span>.{" "}
+            <Link to={`/results/${r.prior_assessment.run_id}`} className="link">Open it</Link>
+          </p>
+          {r.prior_assessment.changed_criteria.length > 0 ? (
+            <ul className="mt-2 list-disc pl-5 font-mono text-xs">
+              {r.prior_assessment.changed_criteria.map((c) => (
+                <li key={c}>{c}</li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-1 text-sm text-slate-600">No criterion outcome changed.</p>
+          )}
+        </Panel>
+      ) : null}
+
       <Panel id="notes-h" title="Reviewer notes" count={r.reviewer_notes.length}>
         {r.reviewer_notes.length === 0 ? (
           <p className="text-sm text-slate-600">No reviewer notes.</p>
@@ -268,7 +352,7 @@ export default function Results() {
         )}
       </Panel>
 
-      <Panel id="decisive-h" title="Decisive evidence trace" count={r.decisive_evidence.length}>
+      <Panel id="decisive-h" title="Protocol evidence behind the decision" count={r.decisive_evidence.length}>
         {r.decisive_evidence.length === 0 ? (
           <p className="text-sm text-slate-600">No decisive evidence recorded.</p>
         ) : (
@@ -293,6 +377,27 @@ export default function Results() {
           </ol>
         )}
       </Panel>
+
+      {externalRefs.length > 0 ? (
+        <Panel id="external-h" title="External references (web search)" count={externalRefs.length}>
+          <p className="mb-3 text-sm text-slate-700">
+            Context for ambiguous protocol wording. Only the criterion text was searched, never patient data, and these
+            references did not affect the result.
+          </p>
+          <ul className="space-y-3 text-sm">
+            {externalRefs.map((x, i) => (
+              <li key={`${x.criterion_id}-${i}`} className="rounded-md border border-slate-200 p-3">
+                <p>
+                  <span className="mr-2 font-mono text-xs font-semibold">{x.criterion_id}</span>
+                  <a href={x.url} target="_blank" rel="noopener noreferrer nofollow" className="link break-words">{x.title}</a>
+                </p>
+                {x.snippet ? <p className="mt-1 text-slate-700">{x.snippet}</p> : null}
+                <p className="mt-1 break-all text-xs text-slate-500">{x.url}</p>
+              </li>
+            ))}
+          </ul>
+        </Panel>
+      ) : null}
 
       <div id="audit" className="scroll-mt-32">
         <AuditTrail runId={d.run_id} />

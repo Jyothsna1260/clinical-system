@@ -15,6 +15,11 @@ ARG PRELOAD_EMBEDDINGS=true
 RUN if [ "$PRELOAD_EMBEDDINGS" = "true" ]; then \
       python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')"; \
     fi
+# Optionally bake the BioBERT clinical NLP model too (about 430 MB; used when CLINICAL_NLP_ENABLED=true).
+ARG PRELOAD_CLINICAL_NLP=false
+RUN if [ "$PRELOAD_CLINICAL_NLP" = "true" ]; then \
+      python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('pritamdeka/BioBERT-mnli-snli-scinli-scitail-mednli-stsb')"; \
+    fi
 
 COPY . .
 RUN python -m scripts.make_synthetic_protocol \
@@ -24,9 +29,11 @@ RUN python -m scripts.make_synthetic_protocol \
 USER app
 
 ENV DATA_DIR=/app/data \
-    PORT=8000
+    PORT=8000 \
+    WEB_CONCURRENCY=1
 EXPOSE 8000
 VOLUME ["/app/data"]
 
-# One worker: the file store serializes writes within a single process.
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT} --workers 1 --proxy-headers --forwarded-allow-ips='*'"]
+# One worker by default: the file store and in-memory workflow state are per process. With DATABASE_URL
+# and REDIS_URL set, WEB_CONCURRENCY can be raised because all state is shared.
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT} --workers ${WEB_CONCURRENCY} --proxy-headers --forwarded-allow-ips='*'"]

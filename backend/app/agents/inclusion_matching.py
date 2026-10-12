@@ -6,6 +6,7 @@ SATISFIED / UNSATISFIED / UNKNOWN per inclusion criterion.
 """
 
 from app.engine.rule_evaluator import evaluate_criterion
+from app.nlp.clinical import ConceptMatcher
 from app.schemas.clinical import Criterion, CriterionEvaluation, EvidenceReference, NormalizedProfile
 from app.services.llm import LLMClient
 
@@ -17,12 +18,13 @@ def match_inclusion(
     profile: NormalizedProfile,
     evidence: dict[str, list[EvidenceReference]],
     llm: LLMClient | None = None,
+    concept_matcher: ConceptMatcher | None = None,
 ) -> list[CriterionEvaluation]:
     results = []
     for c in criteria:
         if c.category != "inclusion":
             continue
-        outcome = evaluate_criterion(c, profile, llm)
+        outcome = evaluate_criterion(c, profile, llm, concept_matcher)
         status = _STATUS[outcome.result]
         notes = list(outcome.notes) + list(c.review_reasons)
         results.append(

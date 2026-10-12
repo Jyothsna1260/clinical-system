@@ -10,6 +10,7 @@ from app import __version__
 from app.api.errors import install_error_handlers
 from app.api.routes import auth, eligibility, health, patients, trials
 from app.config import get_settings
+from app.state import get_run_state
 from app.storage import get_store
 
 settings = get_settings()
@@ -31,7 +32,9 @@ async def lifespan(_: FastAPI):
     for directory in (settings.data_dir, settings.uploads_dir, settings.index_dir):
         directory.mkdir(parents=True, exist_ok=True)
     store = get_store()
-    log.info("file store ready at %s (env=%s)", store.root.resolve(), settings.app_env)
+    where = store.root.resolve() if store.kind == "file" else "DATABASE_URL"
+    log.info("%s store ready at %s; workflow state: %s (env=%s)",
+             store.kind, where, get_run_state().kind, settings.app_env)
     yield
 
 
@@ -45,6 +48,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
+    allow_origin_regex=settings.frontend_origin_regex or None,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PATCH", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],

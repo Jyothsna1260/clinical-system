@@ -4,19 +4,19 @@ import threading
 
 import pytest
 
-from app.storage import AuditEvent, PatientRecord, PatientVersion, Store, TrialRecord, UserRecord
+from app.storage import AuditEvent, FileStore, PatientRecord, PatientVersion, TrialRecord, UserRecord
 
 
 @pytest.fixture
-def store(tmp_path) -> Store:
-    return Store(tmp_path / "store")
+def store(tmp_path) -> FileStore:
+    return FileStore(tmp_path / "store")
 
 
 def test_records_survive_reopening(store, tmp_path):
     user = store.users.put(UserRecord(email="a@example.org", hashed_password="x"))
     trial = store.trials.put(TrialRecord(owner_id=user.id, title="Renal"))
 
-    reopened = Store(tmp_path / "store")
+    reopened = FileStore(tmp_path / "store")
     assert reopened.users.get(user.id).email == "a@example.org"
     assert reopened.trials.get(trial.id).title == "Renal"
     assert reopened.user_by_email("A@Example.org").id == user.id

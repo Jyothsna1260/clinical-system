@@ -7,16 +7,22 @@
      with evidence -> NOT_ELIGIBLE (a proven exclusion always wins);
    - else any UNKNOWN, unresolved conflict, or semantic-model judgement -> MORE_INFORMATION_REQUIRED;
    - else ELIGIBLE (every inclusion SATISFIED, no exclusion TRIGGERED, no material uncertainty).
+3. Traceability: the patient values used (with their normalization trace and the criteria they
+   decided) and, from persistent memory, what changed since the previous assessment.
 """
 
 from datetime import datetime, timezone
 
 from app.agents.contradiction import ContradictionReport
 from app.config import HUMAN_REVIEW_NOTICE
+from app.engine.vocabulary import label
 from app.schemas.clinical import (
     CriterionEvaluation,
     DecisiveEvidence,
     EligibilityResult,
+    NormalizedProfile,
+    PatientValueUsed,
+    PriorAssessment,
     SilentExclusionTrigger,
 )
 
@@ -122,3 +128,68 @@ def review_and_decide(
         analyzed_at=analyzed_at or datetime.now(timezone.utc),
         reviewer_notes=notes,
     )
+
+
+# --------------------------------------------------------------------------- traceability
+
+
+def _fmt(value: float, unit: str | None) -> str:
+    return f"{value:g} {unit}".strip() if unit else f"{value:g}"
+
+
+def patient_values_used(profile: NormalizedProfile, evaluations: list[CriterionEvaluation]) -> list[PatientValueUsed]:
+    """Every patient value the agents compared against the protocol, linked to the criteria it decided."""
+    by_attr: dict[str, list[str]] = {}
+    for e in evaluations:
+        if e.attribute:
+            by_attr.setdefault(e.attribute, []).append(e.criterion_id)
+
+    out: list[PatientValueUsed] = []
+    for attr, criterion_ids in by_attr.items():
+        av = profile.attributes.get(attr)
+        if av is None:
+            continue
+        source = None
+        if av.observations:
+            obs = av.observations[0]
+            converted = obs.original_unit != obs.unit or obs.original_value != obs.value
+            source = f"{obs.source_name} {_fmt(obs.original_value, obs.original_unit)}" + (" (converted)" if converted else "")
+        out.append(PatientValueUsed(
+            attribute=attr, label=label(attr),
+            value=_fmt(av.value, av.unit) if av.value is not None else "Not documented",
+            observed_at=av.observed_at, status=av.status, source=source, criterion_ids=criterion_ids,
+        ))
+
+    condition_ids = by_attr.get("condition", []) + [cid for a, ids in by_attr.items() if a.startswith("event:") for cid in ids]
+    records = [("diagnosis", d.name, d.documented_at) for d in profile.diagnoses]
+    records += [("medication", m.name, m.start_date) for m in profile.medications]
+    records += [("history", h.condition, None) for h in profile.history]
+    evals = {e.criterion_id: e for e in evaluations}
+    for kind, name, when in records:
+        used_by = [cid for cid in condition_ids if name.lower() in (evals[cid].patient_value or "").lower()]
+        value = name
+        if kind == "history":
+            present = next((h.present for h in profile.history if h.condition == name), None)
+            value = f"{name}: {'present' if present else 'absent' if present is False else 'not stated'}"
+        out.append(PatientValueUsed(attribute=kind, label=kind.capitalize(), value=value, observed_at=when,
+                                    criterion_ids=used_by))
+    return out
+
+
+def compare_with_prior(prior: dict | None, overall_status: str,
+                       evaluations: list[CriterionEvaluation]) -> tuple[PriorAssessment | None, list[str]]:
+    """Persistent memory: what changed since the previous assessment of this patient for this trial."""
+    if not prior:
+        return None, []
+    before = prior.get("criterion_statuses") or {}
+    changed = [f"{e.criterion_id} {before[e.criterion_id]} -> {e.status}"
+               for e in evaluations if e.criterion_id in before and before[e.criterion_id] != e.status]
+    memory = PriorAssessment(
+        run_id=prior["run_id"], overall_status=prior.get("overall_status"), analyzed_at=prior.get("analyzed_at"),
+        patient_profile_version=prior["patient_profile_version"], protocol_version=prior["protocol_version"],
+        changed_criteria=changed,
+    )
+    note = (f"Previous assessment (profile v{memory.patient_profile_version}) was {memory.overall_status}; "
+            f"now {overall_status}.")
+    note += f" Changed: {', '.join(changed)}." if changed else " No criterion outcome changed."
+    return memory, [note]
