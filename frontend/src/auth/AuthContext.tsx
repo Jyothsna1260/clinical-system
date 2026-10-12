@@ -6,6 +6,10 @@ interface AuthContextValue {
   user: User | null;
   token: string | null;
   initializing: boolean;
+  /** Set when the session could not be checked for a reason other than an invalid token (e.g. the
+   * server is waking up). The token is kept so a retry can restore the session. */
+  sessionError: unknown;
+  retrySession: () => void;
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string, fullName: string | null) => Promise<void>;
   logout: () => void;
@@ -17,6 +21,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [token, setTokenState] = useState<string | null>(() => client.getToken());
   const [user, setUser] = useState<User | null>(null);
   const [initializing, setInitializing] = useState<boolean>(() => client.getToken() !== null);
+  const [sessionError, setSessionError] = useState<unknown>(null);
+  const [retryNonce, setRetryNonce] = useState(0);
 
   useEffect(() => {
     if (!token || user) {
@@ -25,15 +31,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     let cancelled = false;
     setInitializing(true);
+    setSessionError(null);
     client
       .me()
       .then((u) => {
         if (!cancelled) setUser(u);
       })
-      .catch(() => {
-        if (!cancelled) {
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        if (client.parseApiError(err).status === 401) {
           client.clearToken();
           setTokenState(null);
+        } else {
+          setSessionError(err);
         }
       })
       .finally(() => {
@@ -42,7 +52,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [token, user]);
+  }, [token, user, retryNonce]);
+
+  const retrySession = useCallback(() => setRetryNonce((n) => n + 1), []);
 
   const login = useCallback(async (email: string, password: string) => {
     const out = await client.login({ email, password });
@@ -61,12 +73,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(() => {
     client.clearToken();
     setUser(null);
+    setSessionError(null);
     setTokenState(null);
   }, []);
 
   const value = useMemo(
-    () => ({ user, token, initializing, login, register, logout }),
-    [user, token, initializing, login, register, logout],
+    () => ({ user, token, initializing, sessionError, retrySession, login, register, logout }),
+    [user, token, initializing, sessionError, retrySession, login, register, logout],
   );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

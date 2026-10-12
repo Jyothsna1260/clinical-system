@@ -5,6 +5,7 @@ import { AssessmentLauncher } from "../components/AssessmentLauncher";
 import { DataQualityFlags } from "../components/DataQualityFlags";
 import { PlusIcon } from "../components/Icons";
 import { ErrorState, InlineError, LoadingState } from "../components/States";
+import { WorkflowSteps } from "../components/WorkflowSteps";
 import { formatDateTime } from "../lib/format";
 import {
   emptyDiagnosis,
@@ -25,6 +26,7 @@ import {
 } from "../lib/patientForm";
 import { useAsync } from "../lib/useAsync";
 import type { PatientOut, Sex } from "../types";
+import { ROUTES } from "../lib/routes";
 
 function MissingNote({ id, show, text }: { id: string; show: boolean; text: string }) {
   if (!show) return null;
@@ -150,7 +152,8 @@ export default function PatientForm() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="page-title">{isEdit ? "Edit patient" : "New patient"}</h1>
+        <WorkflowSteps current={2} />
+        <h1 className="page-title mt-3">{isEdit ? "Edit patient" : "New patient"}</h1>
         <p className="text-sm text-slate-600">
           {isEdit && current
             ? `Current version ${current.version} (versions: ${current.versions.join(", ")}). Saving creates a new version; past assessments keep the version they used.`
@@ -174,7 +177,7 @@ export default function PatientForm() {
             {trials.error ? <ErrorState error={trials.error} title="Could not load trials" onRetry={trials.reload} /> : null}
             {trials.data && trials.data.length === 0 ? (
               <p className="text-sm text-slate-600">
-                No trials yet. <Link to="/trials/upload" className="link">Upload a protocol</Link> first.
+                No trials yet. <Link to={ROUTES.uploadTrial} className="link">Upload a protocol</Link> first.
               </p>
             ) : null}
             {trials.data && trials.data.length > 0 ? (
@@ -220,7 +223,7 @@ export default function PatientForm() {
         ) : null}
       </div>
 
-      <form onSubmit={onSubmit} className="space-y-6" noValidate aria-busy={saving}>
+      <form onSubmit={(e) => void onSubmit(e)} className="space-y-6" noValidate aria-busy={saving}>
         {missing.length > 0 ? (
           <div role="status" className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
             <p className="font-semibold">Missing recommended information</p>
@@ -446,7 +449,7 @@ export default function PatientForm() {
           <button type="submit" className="btn-primary" disabled={saving}>
             {saving ? "Saving…" : isEdit || saved ? "Save as new version" : "Create patient"}
           </button>
-          <Link to="/dashboard" className="btn-secondary">Cancel</Link>
+          <Link to={ROUTES.dashboard} className="btn-secondary">Cancel</Link>
         </div>
       </form>
     </div>

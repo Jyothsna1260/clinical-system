@@ -1,11 +1,11 @@
 """Request/response models for the HTTP API."""
 
 from datetime import datetime
-from typing import Any
+from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
-from app.schemas.clinical import Criterion, DataQualityFlag, PatientProfileInput
+from app.schemas.clinical import Criterion, DataQualityFlag, EligibilityResult, PatientProfileInput
 
 
 class RegisterRequest(BaseModel):
@@ -138,8 +138,50 @@ class RunDetail(BaseModel):
     patient_label: str
     patient_profile_version: int
     protocol_version: str
-    result: dict | None
+    # Typed for the API schema; a stored result from an older version that no longer validates is
+    # returned as saved (dict) rather than failing the request.
+    result: Annotated[EligibilityResult | dict, Field(union_mode="left_to_right")] | None
     error: dict | None
     human_review_notice: str
     created_at: datetime
     completed_at: datetime | None
+
+
+class EvidenceItem(BaseModel):
+    criterion_id: str
+    page: int
+    excerpt: str
+    chunk_id: str | None = None
+    source: str | None = None
+    score: float | None = None
+
+
+class RunEvidence(BaseModel):
+    run_id: str
+    trial_id: str
+    protocol_version: str
+    evidence: list[EvidenceItem]
+    human_review_notice: str
+
+
+class AuditEventOut(BaseModel):
+    id: str
+    action: str
+    resource_type: str
+    resource_id: str | None
+    details: dict[str, Any]
+    created_at: str
+
+
+class AgentExecutionLog(BaseModel):
+    node: str
+    status: str
+    started_at: str | None
+    ended_at: str | None
+    summary: dict[str, Any] | None
+
+
+class RunAudit(BaseModel):
+    run_id: str
+    audit_events: list[AuditEventOut]
+    agent_execution_logs: list[AgentExecutionLog]

@@ -57,6 +57,10 @@ class Criterion(StrictModel):
     category: Category
     original_text: str = Field(min_length=1)
     normalized_rule: NormalizedRule | None = None
+    # Compound criteria ("creatinine > 1.5 mg/dL or CrCl < 40 mL/min", "eGFR >= 30 and <= 90"):
+    # the second clause and how it combines with the first. Absent for single-clause criteria.
+    secondary_rule: NormalizedRule | None = None
+    rule_combinator: Literal["and", "or"] | None = None
     required_attributes: list[str] = Field(default_factory=list)
     source_page: int = Field(ge=1)
     source_excerpt: str = Field(min_length=1)
@@ -70,6 +74,10 @@ class Criterion(StrictModel):
         expected = "INC" if self.category == "inclusion" else "EXC"
         if not self.criterion_id.startswith(expected):
             raise ValueError(f"{self.criterion_id} does not match category {self.category}")
+        if (self.secondary_rule is None) != (self.rule_combinator is None):
+            raise ValueError("secondary_rule and rule_combinator must be set together")
+        if self.secondary_rule is not None and self.normalized_rule is None:
+            raise ValueError("secondary_rule requires normalized_rule")
         return self
 
 

@@ -7,13 +7,14 @@ validate_inputs -> extract_protocol -> normalize_patient -> retrieve_evidence
 Invalid/unreadable input or zero extracted criteria routes to `handle_error`, which
 returns a structured error and still goes through `persist` so the run is recorded.
 Runtime dependencies (LLM client, index provider, clinical NLP matcher, web search client,
-prior-assessment memory, progress reporter, persister) are passed via `config["configurable"]` so the graph itself stays pure and testable.
+prior-assessment memory, progress reporter, persister) are passed via `config["configurable"]` so the
+graph itself stays pure and testable.
 """
 
 import logging
 import time
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from functools import lru_cache, wraps
 from typing import Any
 
@@ -50,6 +51,20 @@ def _cfg(config: dict | None, key: str, default: Any = None) -> Any:
     return ((config or {}).get("configurable") or {}).get(key, default)
 
 
+def _safe_reporter(reporter: Reporter | None) -> Reporter | None:
+    """Wrap the progress reporter so a progress-store error is logged instead of stopping the run."""
+    if reporter is None:
+        return None
+
+    def report(*args) -> None:
+        try:
+            reporter(*args)
+        except Exception:
+            log.exception("progress reporting failed for node %s", args[0] if args else "?")
+
+    return report
+
+
 def node(name: str, always: bool = False):
     """Wrap a node: skip after an error, report progress, log timing, convert failures."""
 
@@ -58,8 +73,8 @@ def node(name: str, always: bool = False):
         def wrapper(state: EligibilityState, config: RunnableConfig | None = None) -> dict:
             if state.get("error") and not always:
                 return {}
-            reporter: Reporter | None = _cfg(config, "reporter")
-            started = datetime.now(timezone.utc)
+            reporter: Reporter | None = _safe_reporter(_cfg(config, "reporter"))
+            started = datetime.now(UTC)
             t0 = time.perf_counter()
             if reporter:
                 reporter(name, "running", started, None, None)
@@ -71,9 +86,10 @@ def node(name: str, always: bool = False):
                 summary, status = {"error": exc.message}, "failed"
             except Exception as exc:  # unexpected failure: structured error, never a crash
                 log.exception("node %s failed", name)
-                update = {"error": {"code": "AGENT_FAILURE", "message": f"{name} failed: {exc}", "details": {"node": name}}}
+                update = {"error": {"code": "AGENT_FAILURE", "message": f"The {name} step failed unexpectedly.",
+                                    "details": {"node": name, "error_type": type(exc).__name__}}}
                 summary, status = {"error": str(exc)}, "failed"
-            ended = datetime.now(timezone.utc)
+            ended = datetime.now(UTC)
             summary = {**summary, "duration_ms": round((time.perf_counter() - t0) * 1000, 1)}
             if reporter:
                 reporter(name, status, started, ended, summary)
@@ -152,6 +168,12 @@ def retrieve_evidence_node(state: EligibilityState, config: RunnableConfig | Non
     return {"evidence": evidence}, {"index": getattr(index, "kind", "unknown"), "references": total, "uncited": uncited}
 
 
+def _semantic_llm(config: dict | None):
+    """The LLM for semantic (free-text) criteria, or None when LLM_SEMANTIC_EVALUATION is off, in which
+    case patient data is never sent to the model and such criteria are UNKNOWN (clinical review)."""
+    return _cfg(config, "llm") if _cfg(config, "semantic_evaluation", True) else None
+
+
 def _status_counts(evals) -> dict[str, int]:
     counts: dict[str, int] = {}
     for e in evals:
@@ -161,21 +183,22 @@ def _status_counts(evals) -> dict[str, int]:
 
 @node("inclusion_matching")
 def inclusion_node(state: EligibilityState, config: RunnableConfig | None) -> tuple[dict, dict]:
-    results = match_inclusion(state["criteria"], state["profile"], state["evidence"], _cfg(config, "llm"),
+    results = match_inclusion(state["criteria"], state["profile"], state["evidence"], _semantic_llm(config),
                               _cfg(config, "concept_matcher"))
     return {"inclusion_results": results}, _status_counts(results)
 
 
 @node("exclusion_detection")
 def exclusion_node(state: EligibilityState, config: RunnableConfig | None) -> tuple[dict, dict]:
-    results = detect_exclusions(state["criteria"], state["profile"], state["evidence"], _cfg(config, "llm"),
+    results = detect_exclusions(state["criteria"], state["profile"], state["evidence"], _semantic_llm(config),
                                 _cfg(config, "concept_matcher"))
     return {"exclusion_results": results}, _status_counts(results)
 
 
 @node("detect_contradictions")
 def contradictions_node(state: EligibilityState, config: RunnableConfig | None) -> tuple[dict, dict]:
-    report = detect_contradictions(state["criteria"], state["inclusion_results"], state["exclusion_results"], state["profile"])
+    report = detect_contradictions(state["criteria"], state["inclusion_results"], state["exclusion_results"],
+                                   state["profile"])
     return {"contradictions": report}, {
         "silent_exclusion_triggers": len(report.triggers),
         "conflicts": len(report.conflicts),
@@ -289,6 +312,7 @@ def run_eligibility(
     web_search=None,
     web_search_max_queries: int = 3,
     prior_assessment: dict | None = None,
+    semantic_evaluation: bool = True,
 ) -> EligibilityState:
     state: EligibilityState = {
         "run_id": run_id,
@@ -306,6 +330,6 @@ def run_eligibility(
         "llm": llm, "index_provider": index_provider, "reporter": reporter,
         "persister": persister, "stale_days": stale_days, "concept_matcher": concept_matcher,
         "web_search": web_search, "web_search_max_queries": web_search_max_queries,
-        "prior_assessment": prior_assessment,
+        "prior_assessment": prior_assessment, "semantic_evaluation": semantic_evaluation,
     }}
     return build_graph().invoke(state, config=config)

@@ -11,6 +11,7 @@ Redis layout::
     cte:run:<run_id>:nodes   hash  node -> JSON {status, started_at, ended_at, summary}
 """
 
+import contextlib
 import json
 import logging
 import threading
@@ -127,10 +128,8 @@ class FallbackRunState:
 
     def clear(self, run_id: str) -> None:
         self._fallback.clear(run_id)
-        try:
+        with contextlib.suppress(Exception):  # entries expire on their own if Redis is unreachable
             self._primary.clear(run_id)
-        except Exception:
-            pass
 
     def ping(self) -> bool:
         return self._primary.ping()

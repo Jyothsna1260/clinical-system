@@ -1,6 +1,6 @@
 """Workflow state: Redis (via fakeredis) and in-memory backends, and the fallback when Redis is down."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import fakeredis
 import pytest
@@ -16,7 +16,7 @@ def run_state(request):
 
 
 def test_records_and_reads_node_progress(run_state):
-    started = datetime(2026, 10, 1, tzinfo=timezone.utc)
+    started = datetime(2026, 10, 1, tzinfo=UTC)
     run_state.record_node("r1", "extract_protocol", {"status": "running", "started_at": started, "summary": None})
     run_state.record_node("r1", "extract_protocol", {"status": "completed", "started_at": started,
                                                      "summary": {"criteria": 4}})

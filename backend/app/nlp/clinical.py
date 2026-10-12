@@ -56,7 +56,7 @@ class SentenceTransformerConceptMatcher:
         missing = [t for t in dict.fromkeys(texts) if t not in self._cache]
         if missing:
             vectors = self._load().encode(missing, normalize_embeddings=True, convert_to_numpy=True)
-            self._cache.update(zip(missing, vectors))
+            self._cache.update(zip(missing, vectors, strict=True))
         return np.stack([self._cache[t] for t in texts])
 
     def similar(self, term: str, candidates: list[str]) -> list[tuple[str, float]]:
@@ -65,5 +65,5 @@ class SentenceTransformerConceptMatcher:
             return []
         vectors = self._embed([term, *candidates])
         scores = vectors[1:] @ vectors[0]
-        hits = [(c, float(s)) for c, s in zip(candidates, scores) if s >= self.threshold]
+        hits = [(c, float(s)) for c, s in zip(candidates, scores, strict=True) if s >= self.threshold]
         return sorted(hits, key=lambda h: h[1], reverse=True)

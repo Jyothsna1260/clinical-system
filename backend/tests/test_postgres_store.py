@@ -48,8 +48,12 @@ def test_unsafe_ids_are_never_resolved(store, bad_id):
     assert store.trials.delete(bad_id) is False
 
 
+def _new_patient(store, user) -> PatientRecord:
+    return store.patients.put(PatientRecord(owner_id=user.id, versions=[PatientVersion(version=1, label="p", data={})]))
+
+
 def test_update_is_atomic_under_concurrency(store, user):
-    patient = store.patients.put(PatientRecord(owner_id=user.id, versions=[PatientVersion(version=1, label="p", data={})]))
+    patient = _new_patient(store, user)
 
     def add_version() -> None:
         def apply(p: PatientRecord) -> None:
@@ -66,7 +70,7 @@ def test_update_is_atomic_under_concurrency(store, user):
 
 def test_indexed_columns_follow_updates(store, user):
     trial = store.trials.put(TrialRecord(owner_id=user.id, title="T"))
-    patient = store.patients.put(PatientRecord(owner_id=user.id, versions=[PatientVersion(version=1, label="p", data={})]))
+    patient = _new_patient(store, user)
     run = store.runs.put(RunRecord(owner_id=user.id, trial_id=trial.id, document_id="d", protocol_version="v1",
                                    patient_id=patient.id, patient_profile_id="pp", patient_profile_version=1))
     store.runs.update(run.id, lambda r: setattr(r, "status", "completed"))

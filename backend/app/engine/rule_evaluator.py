@@ -5,6 +5,7 @@ tri-state: True (rule condition holds), False (it does not), None (cannot be dec
 UNKNOWN is never collapsed into True or False.
 """
 
+import json
 import logging
 from dataclasses import dataclass, field
 from typing import Literal
@@ -24,7 +25,7 @@ from app.engine.vocabulary import (
     normalize_text,
 )
 from app.nlp.clinical import ConceptMatcher
-from app.schemas.clinical import Criterion, NormalizedProfile
+from app.schemas.clinical import Criterion, NormalizedProfile, NormalizedRule
 from app.services.llm import UNTRUSTED_DATA_RULE, LLMClient, LLMError
 
 log = logging.getLogger(__name__)
@@ -74,15 +75,14 @@ def _related_lab_summary(criterion: Criterion, profile: NormalizedProfile) -> li
     return out
 
 
-def _evaluate_numeric(criterion: Criterion, profile: NormalizedProfile) -> RuleOutcome:
-    rule = criterion.normalized_rule
-    assert rule is not None
+def _evaluate_numeric(rule: NormalizedRule, profile: NormalizedProfile) -> RuleOutcome:
     attr = rule.attribute
     expected = describe(rule)
     av = profile.attributes.get(attr)
     if av is None or av.status == "missing":
         return RuleOutcome(None, None, expected, "not_evaluable",
-                           f"{label(attr)} is not documented in the patient profile; the criterion cannot be evaluated.",
+                           f"{label(attr)} is not documented in the patient profile; "
+                           "the criterion cannot be evaluated.",
                            [f"Missing value: {label(attr)}."], attr)
     if av.status == "conflicting":
         return RuleOutcome(None, None, expected, "not_evaluable",
@@ -113,7 +113,8 @@ def _evaluate_numeric(criterion: Criterion, profile: NormalizedProfile) -> RuleO
     when = f" (observed {av.observed_at})" if av.observed_at and attr != "age" else ""
     if result is None:
         return RuleOutcome(None, patient_value, expected, "deterministic",
-                           f"Patient {label(attr)} {patient_value} lies exactly on a boundary and the protocol does not "
+                           f"Patient {label(attr)} {patient_value} lies exactly on a boundary and the protocol "
+                           "does not "
                            "state whether the bound is inclusive.",
                            ["Boundary inclusivity not stated in protocol."], attr)
     verb = "meets" if result else "does not meet"
@@ -238,7 +239,8 @@ def _evaluate_event(criterion: Criterion, profile: NormalizedProfile) -> RuleOut
                            ["Undated event."], rule.attribute)
     name, when = candidates[0]
     return RuleOutcome(False, f"{name} on {when}", expected, "deterministic",
-                       f"Most relevant record of {subject} ({when}) is outside the {days}-day window.", [], rule.attribute)
+                       f"Most relevant record of {subject} ({when}) is outside the {days}-day window.", [],
+                       rule.attribute)
 
 
 def _evaluate_data_completeness(criterion: Criterion, profile: NormalizedProfile) -> RuleOutcome:
@@ -274,6 +276,23 @@ def _evaluate_data_completeness(criterion: Criterion, profile: NormalizedProfile
                        f"All required results are present and current ({', '.join(fine)}).", [], "data_completeness")
 
 
+def _semantic_payload(criterion: Criterion, profile: NormalizedProfile) -> dict:
+    """The minimum patient data a free-text criterion can need (data minimisation for the LLM call):
+    age, sex, conditions, medications and history, plus labs only from the criterion's clinical domains."""
+    domain_labs = {a for d in domains_for(criterion.original_text) for a in domain_attributes(d)}
+    age = profile.attributes.get("age")
+    return {
+        "as_of": profile.as_of.isoformat(),
+        "age": age.value if age else None,
+        "sex": profile.sex,
+        "diagnoses": [d.model_dump(mode="json") for d in profile.diagnoses],
+        "medications": [m.model_dump(mode="json") for m in profile.medications],
+        "history": [h.model_dump(mode="json") for h in profile.history],
+        "labs": {a: {"value": v.value, "unit": v.unit, "observed_at": v.observed_at, "status": v.status}
+                 for a, v in profile.attributes.items() if a in domain_labs and v.value is not None},
+    }
+
+
 def _evaluate_semantic(criterion: Criterion, profile: NormalizedProfile, llm: LLMClient | None) -> RuleOutcome:
     expected = criterion.original_text
     if llm is None:
@@ -287,7 +306,7 @@ def _evaluate_semantic(criterion: Criterion, profile: NormalizedProfile, llm: LL
     )
     user = (
         f"<document type=\"criterion\">{criterion.original_text}</document>\n"
-        f"<document type=\"patient\">{profile.model_dump_json(exclude={'data_quality_flags'})}</document>\n"
+        f"<document type=\"patient\">{json.dumps(_semantic_payload(criterion, profile), default=str)}</document>\n"
         "Does the patient meet the criterion as written?"
     )
     try:
@@ -302,9 +321,60 @@ def _evaluate_semantic(criterion: Criterion, profile: NormalizedProfile, llm: LL
                        ["Semantic model judgement; requires human confirmation."])
 
 
+_NUMERIC_OPERATORS = {"gt", "gte", "lt", "lte", "eq", "between"}
+
+
+def _combine(op: str, a: bool | None, b: bool | None) -> bool | None:
+    """Three-valued (Kleene) and/or: an unknown clause never makes the whole criterion pass or fail
+    unless the other clause alone decides it."""
+    if op == "and":
+        if a is False or b is False:
+            return False
+        return True if a is True and b is True else None
+    if a is True or b is True:
+        return True
+    return False if a is False and b is False else None
+
+
+def _evaluate_compound(criterion: Criterion, profile: NormalizedProfile) -> RuleOutcome:
+    first, second = criterion.normalized_rule, criterion.secondary_rule
+    assert first is not None and second is not None and criterion.rule_combinator is not None
+    op = criterion.rule_combinator
+    outcomes = [_evaluate_numeric(r, profile) if r.operator in _NUMERIC_OPERATORS else
+                RuleOutcome(None, None, describe(r), "not_evaluable", f"Clause {describe(r)} is not supported.",
+                            ["Unsupported rule shape."], r.attribute)
+                for r in (first, second)]
+    a, b = outcomes
+    result = _combine(op, a.result, b.result)
+    # The attribute shown is the one that decided the outcome, or the one still unknown.
+    if result is None:
+        decider = a if a.result is None else b
+    elif op == "and":
+        decider = (a if a.result is False else b) if result is False else a
+    else:
+        decider = (a if a.result is True else b) if result is True else a
+    values = [f"{label(o.attribute or '')} {o.patient_value}" for o in outcomes if o.patient_value]
+    method = "deterministic" if all(o.method == "deterministic" for o in outcomes) or result is not None \
+        else "not_evaluable"
+    notes = [n for o in outcomes for n in o.notes]
+    if result is None:
+        notes.append(f"Compound criterion ({op}): one clause could not be decided, so the criterion is UNKNOWN.")
+    return RuleOutcome(
+        result=result,
+        patient_value="; ".join(values) or None,
+        expected=f"{a.expected} {op} {b.expected}",
+        method=method,  # type: ignore[arg-type]
+        explanation=f"Both clauses joined by '{op}': (1) {a.explanation} (2) {b.explanation}",
+        notes=notes,
+        attribute=decider.attribute,
+    )
+
+
 def evaluate_criterion(criterion: Criterion, profile: NormalizedProfile, llm: LLMClient | None = None,
                        concept_matcher: ConceptMatcher | None = None) -> RuleOutcome:
     rule = criterion.normalized_rule
+    if rule is not None and criterion.secondary_rule is not None:
+        return _evaluate_compound(criterion, profile)
     if rule is None:
         return _evaluate_semantic(criterion, profile, llm)
     if rule.attribute == "data_completeness":
@@ -313,8 +383,8 @@ def evaluate_criterion(criterion: Criterion, profile: NormalizedProfile, llm: LL
         return _evaluate_condition(criterion, profile, concept_matcher)
     if rule.operator == "within_days" and rule.attribute.startswith("event:"):
         return _evaluate_event(criterion, profile)
-    if rule.operator in {"gt", "gte", "lt", "lte", "eq", "between"}:
-        return _evaluate_numeric(criterion, profile)
+    if rule.operator in _NUMERIC_OPERATORS:
+        return _evaluate_numeric(rule, profile)
     return RuleOutcome(None, None, describe(rule), "not_evaluable",
                        f"Operator {rule.operator} on {rule.attribute} is not supported deterministically.",
                        ["Unsupported rule shape."], rule.attribute)

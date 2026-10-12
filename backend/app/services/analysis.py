@@ -5,10 +5,10 @@ the final agent logs go to the durable run record (PostgreSQL or the file store)
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
-from app.nlp import get_concept_matcher
 from app.config import get_settings
+from app.nlp import get_concept_matcher
 from app.services import audit
 from app.services.llm import get_llm
 from app.services.trials import get_or_build_index, load_criteria
@@ -128,15 +128,42 @@ def run_analysis(run_id: str) -> None:
             web_search=get_web_search(settings),
             web_search_max_queries=settings.web_search_max_queries,
             prior_assessment=prior_assessment(store, run),
+            semantic_evaluation=settings.llm_semantic_evaluation,
         )
         sync_agent_logs(store, run_state, run.id)
     except Exception as exc:
         log.exception("analysis %s crashed", run_id)
-
-        def fail(r: RunRecord) -> None:
-            r.status = "failed"
-            r.error = {"code": "ANALYSIS_CRASHED", "message": str(exc), "details": {}}
-            r.completed_at = utcnow()
-
-        store.runs.update(run_id, fail)
+        _fail_if_unfinished(store, run_id, "ANALYSIS_CRASHED",
+                            "The analysis stopped because of an internal error. Please try again.",
+                            {"error_type": type(exc).__name__})
         sync_agent_logs(store, run_state, run_id)
+        return
+    # The workflow returned but never saved an outcome (e.g. saving the result itself failed).
+    _fail_if_unfinished(store, run_id, "ANALYSIS_INCOMPLETE",
+                        "The analysis finished without saving a result. Please try again.", {})
+
+
+def _fail_if_unfinished(store: Store, run_id: str, code: str, message: str, details: dict) -> None:
+    """Mark a run failed unless it already reached a final status."""
+
+    def fail(r: RunRecord) -> None:
+        if r.status in {"completed", "failed"}:
+            return
+        r.status = "failed"
+        r.error = {"code": code, "message": message, "details": details}
+        r.completed_at = utcnow()
+
+    store.runs.update(run_id, fail)
+
+
+def fail_interrupted_runs(store: Store, older_than_minutes: int) -> int:
+    """Startup recovery: runs left queued/running by a restart can never finish (background tasks are
+    in-process), so mark them failed and let the user re-run them. Returns how many were marked."""
+    cutoff = utcnow() - timedelta(minutes=older_than_minutes)
+    stuck = [r for status in ("queued", "running") for r in store.runs.where(status=status)
+             if r.updated_at < cutoff]
+    for r in stuck:
+        _fail_if_unfinished(store, r.id, "ANALYSIS_INTERRUPTED",
+                            "The analysis was interrupted (the service restarted). Please run it again.", {})
+        audit.record(store, r.owner_id, "analysis.failed", "eligibility_run", r.id, {"error": "ANALYSIS_INTERRUPTED"})
+    return len(stuck)

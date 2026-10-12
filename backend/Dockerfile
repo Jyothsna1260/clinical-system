@@ -30,10 +30,10 @@ USER app
 
 ENV DATA_DIR=/app/data \
     PORT=8000 \
-    WEB_CONCURRENCY=1
+    UVICORN_WORKERS=1
 EXPOSE 8000
 VOLUME ["/app/data"]
 
 # One worker by default: the file store and in-memory workflow state are per process. With DATABASE_URL
-# and REDIS_URL set, WEB_CONCURRENCY can be raised because all state is shared.
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT} --workers ${WEB_CONCURRENCY} --proxy-headers --forwarded-allow-ips='*'"]
+# and REDIS_URL set, UVICORN_WORKERS can be raised because all state is shared.
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT} --workers ${UVICORN_WORKERS} --proxy-headers --forwarded-allow-ips='*'"]

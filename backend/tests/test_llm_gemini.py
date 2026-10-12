@@ -17,6 +17,38 @@ def _ok(text: str) -> httpx.Response:
     return _response(200, {"candidates": [{"content": {"parts": [{"text": text}]}, "finishReason": "STOP"}]})
 
 
+@pytest.fixture(autouse=True)
+def no_backoff_sleep(monkeypatch):
+    """Retries back off with time.sleep; skip the waiting in tests."""
+    monkeypatch.setattr("app.services.llm.time.sleep", lambda _s: None)
+
+
+def test_transient_errors_are_retried_then_succeed(monkeypatch):
+    responses = iter([_response(503), _response(429), _ok('{"ok": true}')])
+    calls = []
+
+    def fake_post(*a, **k):
+        calls.append(1)
+        return next(responses)
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    assert GeminiLLM("k", "m", 5).complete_json("s", "u", SCHEMA) == {"ok": True}
+    assert len(calls) == 3
+
+
+def test_timeouts_are_retried_then_raise_llm_error(monkeypatch):
+    calls = []
+
+    def fake_post(*a, **k):
+        calls.append(1)
+        raise httpx.ReadTimeout("slow")
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    with pytest.raises(LLMError):
+        GeminiLLM("k", "m", 5).complete_json("s", "u", SCHEMA)
+    assert len(calls) == 3  # first try + 2 retries
+
+
 def test_get_llm_builds_gemini_client_with_default_model():
     llm = get_llm(Settings(llm_provider="gemini", llm_api_key="k"))
     assert isinstance(llm, GeminiLLM) and llm.model == "gemini-flash-latest"

@@ -76,9 +76,9 @@ def _rule_conflicts(criteria: list[Criterion]) -> list[Conflict]:
                 continue
             vi, ve = float(ri.value), float(re_.value)  # type: ignore[arg-type]
             # inclusion requires x >= vi (or >), exclusion removes x >= ve (or >): if ve <= vi, nothing remains.
-            if ri.operator in {"gt", "gte"} and re_.operator in {"gt", "gte"} and ve <= vi:
-                impossible = True
-            elif ri.operator in {"lt", "lte"} and re_.operator in {"lt", "lte"} and ve >= vi:
+            both_lower = ri.operator in {"gt", "gte"} and re_.operator in {"gt", "gte"}
+            both_upper = ri.operator in {"lt", "lte"} and re_.operator in {"lt", "lte"}
+            if (both_lower and ve <= vi) or (both_upper and ve >= vi):
                 impossible = True
             else:
                 impossible = False
@@ -144,11 +144,13 @@ def detect_contradictions(
                 continue  # never create a trigger without a patient value and a protocol citation
 
             parts = [
-                "Patient satisfies " + ", ".join(f"{e.criterion_id} ({by_id[e.criterion_id].original_text.rstrip('.')})" for e in passed)
+                "Patient satisfies "
+                + ", ".join(f"{e.criterion_id} ({by_id[e.criterion_id].original_text.rstrip('.')})" for e in passed)
                 + f", but in the {domain} domain:"
             ]
             for e in failing_inc:
-                parts.append(f"{e.criterion_id} is UNSATISFIED (patient {e.patient_value}; required {e.expected_condition}).")
+                parts.append(f"{e.criterion_id} is UNSATISFIED "
+                             f"(patient {e.patient_value}; required {e.expected_condition}).")
             for e in triggered:
                 parts.append(f"{e.criterion_id} is TRIGGERED ({e.patient_value}).")
             uncertainties = []
@@ -156,7 +158,8 @@ def detect_contradictions(
                 text = by_id[e.criterion_id].original_text.rstrip(".")
                 confirm = next((n_ for n_ in e.uncertainty_notes if "not confirmed by" in n_), None)
                 detail = confirm or "requires clinical confirmation"
-                parts.append(f"{e.criterion_id} ('{text}') is UNKNOWN: {detail.rstrip('.')}; requires clinical confirmation.")
+                reason = f": {confirm.rstrip('.')}" if confirm else ""
+                parts.append(f"{e.criterion_id} ('{text}') is UNKNOWN{reason}; requires clinical confirmation.")
                 uncertainties.append(f"{e.criterion_id}: {detail}")
             pages = sorted({r.page for r in refs})
             parts.append("Cited protocol pages: " + ", ".join(str(p) for p in pages) + ".")

@@ -68,8 +68,11 @@ export function EvidencePanel({
   const text = page.data?.text ?? "";
   const match = page.data ? findExcerpt(text, target.excerpt) : null;
 
+  // Keyed on the match position, not the match object (a new object every render), so the page only
+  // scrolls when the highlighted excerpt actually changes.
   useEffect(() => {
     if (match && markRef.current) markRef.current.scrollIntoView({ block: "center" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [match?.start, match?.end, page.data]);
 
   // Portal to <body> so parent layout (spacing utilities, transforms) never offsets the overlay.

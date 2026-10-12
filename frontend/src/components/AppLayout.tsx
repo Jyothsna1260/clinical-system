@@ -4,11 +4,12 @@ import { useAuth } from "../auth/AuthContext";
 import { CloseIcon, FileIcon, GridIcon, LogoutIcon, MenuIcon, UsersIcon } from "./Icons";
 import { ThemeToggle } from "./ThemeToggle";
 import { useToast } from "./Toast";
+import { ROUTES } from "../lib/routes";
 
 const NAV = [
-  { to: "/dashboard", label: "Dashboard", Icon: GridIcon },
-  { to: "/trials/upload", label: "Upload protocol", Icon: FileIcon },
-  { to: "/patients/new", label: "New patient", Icon: UsersIcon },
+  { to: ROUTES.dashboard, label: "Dashboard", Icon: GridIcon },
+  { to: ROUTES.uploadTrial, label: "Upload protocol", Icon: FileIcon },
+  { to: ROUTES.newPatient, label: "New patient", Icon: UsersIcon },
 ];
 
 function navClass({ isActive }: { isActive: boolean }): string {
@@ -48,7 +49,7 @@ export function AppLayout() {
   const onLogout = () => {
     logout();
     notify("info", "Signed out", "See you next time.");
-    navigate("/login", { replace: true });
+    navigate(ROUTES.login, { replace: true });
   };
 
   const displayName = user ? user.full_name || user.email : "";
@@ -60,7 +61,7 @@ export function AppLayout() {
       </a>
       <header className="sticky top-0 z-30 border-b border-slate-200/80 bg-surface/75 backdrop-blur-lg">
         <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-4 px-4 sm:px-6">
-          <NavLink to="/dashboard" className="flex min-w-0 items-center gap-2.5 rounded-lg">
+          <NavLink to={ROUTES.dashboard} className="flex min-w-0 items-center gap-2.5 rounded-lg">
             <BrandMark />
             <span className="min-w-0 leading-tight">
               <span className="block truncate font-semibold tracking-tight text-slate-900">Trial Eligibility</span>

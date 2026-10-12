@@ -1,6 +1,6 @@
 import type { Criterion } from "../types";
 import { formatPercent } from "../lib/format";
-import { ruleSummary } from "../lib/rules";
+import { criterionRuleSummary } from "../lib/rules";
 import { AlertTriangleIcon } from "./Icons";
 
 function CriterionCard({ c }: { c: Criterion }) {
@@ -23,7 +23,7 @@ function CriterionCard({ c }: { c: Criterion }) {
       </div>
       <p className="mt-2 text-sm text-slate-900">{c.original_text}</p>
       <p className="mt-1 text-xs text-slate-700">
-        <span className="font-semibold">Normalized rule:</span> <code className="break-words">{ruleSummary(c.normalized_rule)}</code>
+        <span className="font-semibold">Normalized rule:</span> <code className="break-words">{criterionRuleSummary(c)}</code>
       </p>
       {c.required_attributes.length > 0 ? (
         <p className="mt-1 text-xs text-slate-600">

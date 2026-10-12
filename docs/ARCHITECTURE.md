@@ -16,7 +16,7 @@ backend   api/routes/     HTTP only: parse the request, call one service functio
             ├── workflow/   LangGraph graph that runs the agents in order
             │     └── agents/  A–F + web research, using engine/ (rules, units, dates), rag/ (PDF, chunks,
             │                  index) and nlp/ (optional BioBERT concept matching)
-            └── security/   password hashing, JWT tokens, current-user dependency
+            └── security/   password hashing, JWT tokens, current-user dependency, auth rate limits
 ```
 
 Rules that keep the flow clear:
@@ -124,6 +124,9 @@ DATA_DIR/                     (backend/data locally, /app/data in Docker and on 
 | The final ELIGIBLE / NOT_ELIGIBLE decision | `backend/app/agents/reviewer.py` |
 | Order of the agents | `backend/app/workflow/graph.py` |
 | How records are saved | `backend/app/storage/` (`file_store.py`, `postgres_store.py`) |
+| Compound criteria ("A or B", "x and y") | `parse_rule` in `agents/protocol_extraction.py`, `_evaluate_compound` in `engine/rule_evaluator.py` |
+| Startup recovery of interrupted runs | `fail_interrupted_runs` in `services/analysis.py` |
+| Route paths in the UI | `frontend/src/lib/routes.ts` |
 | Live workflow state | `backend/app/state/run_state.py` |
 | Clinical NLP (BioBERT) matching | `backend/app/nlp/clinical.py`, used in `engine/rule_evaluator.py` |
 | Web search for ambiguous criteria | `backend/app/services/web_search.py`, `backend/app/agents/web_research.py` |

@@ -21,6 +21,7 @@ os.environ.update({
     "REDIS_URL": "",
     "WEB_SEARCH_PROVIDER": "none",
     "CLINICAL_NLP_ENABLED": "false",
+    "AUTH_RATE_LIMIT_PER_MINUTE": "0",  # disabled for the suite; tests/test_audit_fixes.py enables it
 })
 
 import pytest  # noqa: E402
@@ -29,7 +30,8 @@ FIXTURES = Path(__file__).parent / "fixtures"
 
 
 def _ensure_pdfs() -> None:
-    from scripts.make_synthetic_protocol import DEMO_PROTOCOLS, FIXTURES as OUT, make_demo_protocol, make_protocol
+    from scripts.make_synthetic_protocol import DEMO_PROTOCOLS, make_demo_protocol, make_protocol
+    from scripts.make_synthetic_protocol import FIXTURES as OUT
 
     for name, defined in (("protocol_renal.pdf", False), ("protocol_renal_defined.pdf", True)):
         if not (OUT / name).exists():
@@ -91,14 +93,14 @@ def client():
 
     from app.config import get_settings
     from app.main import app
-    from app.storage import reset_store
-
+    from app.security.rate_limit import reset_counter
     from app.state import reset_run_state
-    from app.storage import get_store
+    from app.storage import get_store, reset_store
 
     shutil.rmtree(get_settings().data_dir, ignore_errors=True)
     reset_store()
     reset_run_state()
+    reset_counter()
     if get_settings().database_url:
         get_store().truncate_all()
     with TestClient(app) as c:

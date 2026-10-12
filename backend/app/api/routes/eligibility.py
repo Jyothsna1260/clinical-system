@@ -1,6 +1,6 @@
 from fastapi import APIRouter, BackgroundTasks, Depends, Query
 
-from app.schemas.api import AnalyzeRequest, RunCreated, RunDetail, RunStatus, RunSummary
+from app.schemas.api import AnalyzeRequest, RunAudit, RunCreated, RunDetail, RunEvidence, RunStatus, RunSummary
 from app.security.deps import get_current_user
 from app.services import eligibility
 from app.services.analysis import run_analysis
@@ -34,11 +34,11 @@ def get_run(run_id: str, user: UserRecord = Depends(get_current_user), store: St
     return eligibility.run_detail(store, run_id, user.id)
 
 
-@router.get("/{run_id}/evidence")
+@router.get("/{run_id}/evidence", response_model=RunEvidence)
 def get_evidence(run_id: str, user: UserRecord = Depends(get_current_user), store: Store = Depends(get_store)) -> dict:
     return eligibility.run_evidence(store, run_id, user.id)
 
 
-@router.get("/{run_id}/audit")
+@router.get("/{run_id}/audit", response_model=RunAudit)
 def get_audit(run_id: str, user: UserRecord = Depends(get_current_user), store: Store = Depends(get_store)) -> dict:
     return eligibility.run_audit(store, run_id, user.id)

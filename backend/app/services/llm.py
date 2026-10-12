@@ -10,6 +10,9 @@ not validate is treated as "no answer" (UNKNOWN), never as a finding.
 
 import json
 import logging
+import random
+import time
+from collections.abc import Callable
 from typing import Any, Protocol
 
 import httpx
@@ -29,6 +32,34 @@ UNTRUSTED_DATA_RULE = (
 
 class LLMError(RuntimeError):
     pass
+
+
+RETRY_STATUSES = {408, 409, 429, 500, 502, 503, 504}
+MAX_RETRIES = 2
+
+
+def _post_with_retry(send: Callable[[], httpx.Response], provider: str, retries: int = MAX_RETRIES) -> httpx.Response:
+    """Send a request, retrying transient failures (timeouts, connection errors, 408/409/429/5xx)
+    with exponential backoff and jitter, honouring a numeric Retry-After header (capped at 20 s).
+
+    The final response is returned even if it is an error status; the caller decides what it means.
+    """
+    for attempt in range(retries + 1):
+        try:
+            response = send()
+        except (httpx.TimeoutException, httpx.TransportError) as exc:
+            if attempt == retries:
+                raise
+            log.warning("%s request failed (%s), retrying", provider, type(exc).__name__)
+            time.sleep(min(2 ** attempt + random.random(), 20))
+            continue
+        if response.status_code not in RETRY_STATUSES or attempt == retries:
+            return response
+        retry_after = response.headers.get("retry-after", "")
+        delay = float(retry_after) if retry_after.isdigit() else 2 ** attempt + random.random()
+        log.warning("%s returned %s, retrying in %.1fs", provider, response.status_code, min(delay, 20))
+        time.sleep(min(delay, 20))
+    raise AssertionError("unreachable")
 
 
 class LLMClient(Protocol):
@@ -51,15 +82,16 @@ class AnthropicLLM:
         import anthropic
 
         try:
-            response = self._client.messages.create(
+            # Beta client: typed `betas` + `fallbacks` (server-side fallback re-runs a declined request on
+            # a suitable model). Thinking is omitted, which runs adaptive thinking; effort sets its depth.
+            response = self._client.beta.messages.create(
                 model=self.model,
                 max_tokens=16000,
                 system=system,
                 messages=[{"role": "user", "content": user}],
                 output_config={"effort": "medium", "format": {"type": "json_schema", "schema": schema}},
-                # Server-side fallback re-runs a declined request on a suitable model.
-                extra_headers={"anthropic-beta": "server-side-fallback-2026-07-01"},
-                extra_body={"fallbacks": "default"},
+                betas=["server-side-fallback-2026-07-01"],
+                fallbacks="default",
             )
         except anthropic.RateLimitError as exc:
             raise LLMError(f"anthropic rate limited: {exc}") from exc
@@ -98,12 +130,12 @@ class OpenAILLM:
             },
         }
         try:
-            r = httpx.post(
+            r = _post_with_retry(lambda: httpx.post(
                 "https://api.openai.com/v1/chat/completions",
                 headers={"Authorization": f"Bearer {self._api_key}"},
                 json=body,
                 timeout=self._timeout,
-            )
+            ), "openai")
             r.raise_for_status()
             text = r.json()["choices"][0]["message"]["content"]
         except (httpx.HTTPError, KeyError, IndexError, ValueError) as exc:
@@ -123,12 +155,12 @@ class GeminiLLM:
         self._timeout = timeout
 
     def _generate(self, body: dict[str, Any]) -> httpx.Response:
-        return httpx.post(
+        return _post_with_retry(lambda: httpx.post(
             f"{self.BASE_URL}/{self.model}:generateContent",
             headers={"x-goog-api-key": self._api_key},
             json=body,
             timeout=self._timeout,
-        )
+        ), "gemini")
 
     def complete_json(self, system: str, user: str, schema: dict[str, Any]) -> dict[str, Any]:
         body: dict[str, Any] = {

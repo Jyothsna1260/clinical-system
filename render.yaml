@@ -43,8 +43,9 @@ services:
           property: connectionString
       - key: FRONTEND_ORIGIN    # comma-separated exact origins; put your Vercel production URL first
         value: https://cte-system.vercel.app,https://cte-system-app.onrender.com,http://localhost:5173
-      - key: FRONTEND_ORIGIN_REGEX  # Vercel preview deployments of the same project
-        value: https://cte-system(-[a-z0-9-]+)?\.vercel\.app
+      # To also allow Vercel preview deployments, add FRONTEND_ORIGIN_REGEX scoped to your Vercel team slug,
+      # e.g. https://cte-system-[a-z0-9-]+-<team-slug>\.vercel\.app  (a bare "cte-system-*" pattern would also
+      # match other people's Vercel projects).
       - key: LLM_PROVIDER
         value: gemini
       - key: LLM_API_KEY

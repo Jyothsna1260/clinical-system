@@ -1,1 +1,4 @@
-"""The six agents (A-F) that the eligibility workflow runs: extraction, profile, inclusion, exclusion, contradiction, reviewer."""
+"""The agents the eligibility workflow runs.
+
+A extraction, B patient profile, C inclusion, D exclusion, E contradiction, F reviewer, plus web research.
+"""

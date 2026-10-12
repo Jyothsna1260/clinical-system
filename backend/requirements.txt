@@ -36,3 +36,4 @@ bcrypt==4.0.1
 reportlab==5.0.1
 pytest==9.1.1
 fakeredis==2.39.0
+ruff==0.17.0

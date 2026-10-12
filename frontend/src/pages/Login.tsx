@@ -8,6 +8,7 @@ import { InlineError } from "../components/States";
 import { ReviewNotice } from "../components/ReviewNotice";
 import { ThemeToggle } from "../components/ThemeToggle";
 import { useToast } from "../components/Toast";
+import { ROUTES } from "../lib/routes";
 
 // Synthetic demo account created by `python -m scripts.seed`; it holds synthetic data only.
 const DEMO_EMAIL = "demo@example.org";
@@ -21,8 +22,8 @@ const FEATURES = [
 ];
 
 function safeNext(next: string | null): string {
-  if (next && next.startsWith("/") && !next.startsWith("//") && !next.startsWith("/login")) return next;
-  return "/dashboard";
+  if (next && next.startsWith("/") && !next.startsWith("//") && !next.startsWith(ROUTES.login)) return next;
+  return ROUTES.dashboard;
 }
 
 export default function Login() {
@@ -133,7 +134,7 @@ export default function Login() {
             </button>
           ) : null}
 
-          <form onSubmit={onSubmit} className="card space-y-4 p-6" aria-busy={busy}>
+          <form onSubmit={(e) => void onSubmit(e)} className="card space-y-4 p-6" aria-busy={busy}>
             <div>
               <label htmlFor="email" className="label">Email</label>
               <input id="email" type="email" autoComplete="email" required placeholder="you@hospital.org" className="input" value={email} onChange={(e) => setEmail(e.target.value)} />

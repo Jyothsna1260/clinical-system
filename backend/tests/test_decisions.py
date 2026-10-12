@@ -1,10 +1,10 @@
 """End-to-end agent decisions through the LangGraph workflow (offline)."""
 
-from app.agents.reviewer import review_and_decide
 from app.agents.contradiction import ContradictionReport
+from app.agents.patient_profile import normalize_patient
+from app.agents.reviewer import review_and_decide
 from app.engine.rule_evaluator import evaluate_criterion
 from app.schemas.clinical import Criterion, CriterionEvaluation, NormalizedProfile, PatientProfileInput
-from app.agents.patient_profile import normalize_patient
 
 
 def _by_id(results):
@@ -136,6 +136,7 @@ def test_node_logs_recorded(renal_pages, run_workflow):
     events = []
     state = run_workflow(renal_pages, "patient_69_egfr28.json",
                          reporter=lambda node, status, *_: events.append((node, status)))
-    nodes = {l["node"] for l in state["logs"]}
-    assert {"inclusion_matching", "exclusion_detection", "detect_contradictions", "review_and_decide", "persist"} <= nodes
+    nodes = {entry["node"] for entry in state["logs"]}
+    expected = {"inclusion_matching", "exclusion_detection", "detect_contradictions", "review_and_decide", "persist"}
+    assert expected <= nodes
     assert ("review_and_decide", "completed") in events

@@ -1,6 +1,6 @@
 """Password hashing (bcrypt) and JWT access tokens."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -23,7 +23,7 @@ def verify_password(password: str, hashed: str) -> bool:
 
 def create_access_token(user_id: str) -> str:
     s = get_settings()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     payload = {"sub": user_id, "iat": now, "exp": now + timedelta(minutes=s.jwt_expire_minutes), "type": "access"}
     return jwt.encode(payload, s.jwt_secret, algorithm=s.jwt_algorithm)
 

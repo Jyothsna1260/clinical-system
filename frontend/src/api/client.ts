@@ -2,7 +2,7 @@ import axios, { AxiosError, type AxiosProgressEvent, type InternalAxiosRequestCo
 import type {
   AnalyzeRequest,
   ApiErrorBody,
-  Criterion,
+  Health,
   LoginRequest,
   PageOut,
   PatientCreate,
@@ -13,7 +13,6 @@ import type {
   RunAudit,
   RunCreated,
   RunDetail,
-  RunEvidence,
   RunStatus,
   RunSummary,
   TokenOut,
@@ -21,8 +20,17 @@ import type {
   TrialSummary,
   User,
 } from "../types";
+import { ROUTES } from "../lib/routes";
 
-export const API_URL: string = (import.meta.env.VITE_API_URL as string | undefined) || "http://localhost:8000";
+const CONFIGURED_API_URL = (import.meta.env.VITE_API_URL as string | undefined)?.trim();
+
+/** API base URL. The localhost fallback applies only to the dev server, never to a production build. */
+export const API_URL: string = CONFIGURED_API_URL || (import.meta.env.DEV ? "http://localhost:8000" : "");
+
+/** Set when a production build was made without VITE_API_URL; the app shows it instead of failing quietly. */
+export const API_CONFIG_ERROR: string | null = API_URL
+  ? null
+  : "This build has no API address. Set VITE_API_URL in the hosting provider's environment variables (for example in Vercel project settings) and redeploy.";
 
 const TOKEN_KEY = "cte_token";
 
@@ -90,9 +98,9 @@ api.interceptors.response.use(
       const isAuthCall = url.includes("/api/auth/login") || url.includes("/api/auth/register");
       if (!isAuthCall) {
         clearToken();
-        if (window.location.pathname !== "/login") {
+        if (window.location.pathname !== ROUTES.login) {
           const next = encodeURIComponent(window.location.pathname + window.location.search);
-          window.location.assign(`/login?next=${next}`);
+          window.location.assign(ROUTES.loginNext(next));
         }
       }
       return Promise.reject(error);
@@ -124,7 +132,7 @@ export interface ParsedApiError {
 
 function isApiErrorBody(data: unknown): data is ApiErrorBody {
   if (typeof data !== "object" || data === null || !("error" in data)) return false;
-  const err = (data as { error: unknown }).error;
+  const err: unknown = data.error;
   return typeof err === "object" && err !== null && "message" in err;
 }
 
@@ -173,6 +181,11 @@ export function errorMessage(err: unknown): string {
 
 // ------------------------------------------------------------------ endpoints
 
+// health (public): limits and feature status
+export async function getHealth(): Promise<Health> {
+  return (await api.get<Health>("/api/health")).data;
+}
+
 // auth
 export async function register(body: RegisterRequest): Promise<TokenOut> {
   return (await api.post<TokenOut>("/api/auth/register", body)).data;
@@ -197,12 +210,6 @@ export async function uploadTrial(
 }
 export async function listTrials(): Promise<TrialSummary[]> {
   return (await api.get<TrialSummary[]>("/api/trials")).data;
-}
-export async function getTrial(trialId: string): Promise<TrialDetail> {
-  return (await api.get<TrialDetail>(`/api/trials/${encodeURIComponent(trialId)}`)).data;
-}
-export async function getCriteria(trialId: string): Promise<Criterion[]> {
-  return (await api.get<Criterion[]>(`/api/trials/${encodeURIComponent(trialId)}/criteria`)).data;
 }
 export async function getPage(trialId: string, page: number): Promise<PageOut> {
   return (await api.get<PageOut>(`/api/trials/${encodeURIComponent(trialId)}/pages/${page}`)).data;
@@ -234,9 +241,6 @@ export async function getRunStatus(runId: string): Promise<RunStatus> {
 }
 export async function getRun(runId: string): Promise<RunDetail> {
   return (await api.get<RunDetail>(`/api/eligibility/${encodeURIComponent(runId)}`)).data;
-}
-export async function getEvidence(runId: string): Promise<RunEvidence> {
-  return (await api.get<RunEvidence>(`/api/eligibility/${encodeURIComponent(runId)}/evidence`)).data;
 }
 export async function getAudit(runId: string): Promise<RunAudit> {
   return (await api.get<RunAudit>(`/api/eligibility/${encodeURIComponent(runId)}/audit`)).data;

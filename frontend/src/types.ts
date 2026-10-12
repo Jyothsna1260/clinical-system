@@ -7,6 +7,21 @@ export type ISODate = string;
 
 // ------------------------------------------------------------------ errors
 
+/** GET /api/health (public). */
+export interface Health {
+  status: string;
+  storage: string;
+  storage_backend: string;
+  workflow_state: string;
+  llm_provider: string;
+  embeddings_enabled: boolean;
+  clinical_nlp: string;
+  web_search: string;
+  max_upload_mb?: number;
+  max_pdf_pages?: number;
+  human_review_notice: string;
+}
+
 export interface ApiErrorBody {
   error: {
     code: string;
@@ -48,6 +63,9 @@ export interface Criterion {
   category: Category;
   original_text: string;
   normalized_rule?: NormalizedRule | null;
+  /** Second clause of a compound criterion ("A or B", "x >= 30 and <= 90"). */
+  secondary_rule?: NormalizedRule | null;
+  rule_combinator?: "and" | "or" | null;
   required_attributes: string[];
   source_page: number;
   source_excerpt: string;
@@ -325,7 +343,7 @@ export type NodeStatus = "pending" | "running" | "completed" | "failed";
 
 export interface NodeProgress {
   node: string;
-  status: NodeStatus | string;
+  status: NodeStatus | (string & {});
   started_at?: ISODateTime | null;
   ended_at?: ISODateTime | null;
   summary?: Record<string, unknown> | null;
@@ -333,7 +351,7 @@ export interface NodeProgress {
 
 export interface RunStatus {
   run_id: string;
-  status: RunState | string;
+  status: RunState | (string & {});
   overall_status: OverallStatus | null;
   progress: NodeProgress[];
   error: StructuredError | null;
@@ -348,14 +366,14 @@ export interface RunSummary {
   patient_id: string;
   patient_label: string;
   patient_profile_version: number;
-  status: RunState | string;
+  status: RunState | (string & {});
   overall_status: OverallStatus | null;
   created_at: ISODateTime;
 }
 
 export interface RunDetail {
   run_id: string;
-  status: RunState | string;
+  status: RunState | (string & {});
   trial_id: string;
   trial_title: string;
   patient_id: string;

@@ -22,7 +22,6 @@ from app.storage.records import (
     utcnow,
 )
 
-
 if TYPE_CHECKING:
     from app.storage.postgres_store import PostgresStore
 

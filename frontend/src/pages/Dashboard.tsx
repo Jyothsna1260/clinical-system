@@ -10,6 +10,7 @@ import { StatusBadge } from "../components/StatusBadge";
 import { formatDateTime } from "../lib/format";
 import { useAsync } from "../lib/useAsync";
 import type { RunSummary } from "../types";
+import { ROUTES } from "../lib/routes";
 
 /** Animates a number from 0 to `value` once it is known. */
 function useCountUp(value: number, ms = 700): number {
@@ -159,10 +160,10 @@ export default function Dashboard() {
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Link to="/trials/upload" className="btn-secondary">
+            <Link to={ROUTES.uploadTrial} className="btn-secondary">
               <UploadIcon /> Upload protocol
             </Link>
-            <Link to="/patients/new" className="btn-primary">
+            <Link to={ROUTES.newPatient} className="btn-primary">
               <PlusIcon /> New patient
             </Link>
           </div>
@@ -193,9 +194,9 @@ export default function Dashboard() {
               {d.trials.length === 0 || d.patients.length === 0 ? (
                 <p className="text-sm text-slate-600">
                   You need at least one ready trial and one patient.{" "}
-                  {d.trials.length === 0 ? <Link to="/trials/upload" className="link">Upload a protocol</Link> : null}
+                  {d.trials.length === 0 ? <Link to={ROUTES.uploadTrial} className="link">Upload a protocol</Link> : null}
                   {d.trials.length === 0 && d.patients.length === 0 ? " and " : null}
-                  {d.patients.length === 0 ? <Link to="/patients/new" className="link">create a patient</Link> : null}.
+                  {d.patients.length === 0 ? <Link to={ROUTES.newPatient} className="link">create a patient</Link> : null}.
                 </p>
               ) : (
                 <AssessmentLauncher trials={d.trials} patients={d.patients} idPrefix="dash" />
@@ -217,7 +218,7 @@ export default function Dashboard() {
             <Section id="trials-h" title="Trial protocols" action={d.trials.length > 3 ? <SearchBox value={trialQ} onChange={setTrialQ} label="Filter trials" /> : undefined}>
               {d.trials.length === 0 ? (
                 <EmptyState title="No trial protocols yet">
-                  <Link to="/trials/upload" className="link">Upload a protocol PDF</Link> to extract its criteria.
+                  <Link to={ROUTES.uploadTrial} className="link">Upload a protocol PDF</Link> to extract its criteria.
                 </EmptyState>
               ) : filtered.trials.length === 0 ? (
                 <p className="py-4 text-center text-sm text-slate-500">No trials match “{trialQ}”.</p>
@@ -245,7 +246,7 @@ export default function Dashboard() {
             <Section id="patients-h" title="Patients" action={d.patients.length > 3 ? <SearchBox value={patientQ} onChange={setPatientQ} label="Filter patients" /> : undefined}>
               {d.patients.length === 0 ? (
                 <EmptyState title="No patient profiles yet">
-                  <Link to="/patients/new" className="link">Create a patient profile</Link> to run an assessment.
+                  <Link to={ROUTES.newPatient} className="link">Create a patient profile</Link> to run an assessment.
                 </EmptyState>
               ) : filtered.patients.length === 0 ? (
                 <p className="py-4 text-center text-sm text-slate-500">No patients match “{patientQ}”.</p>
@@ -260,7 +261,7 @@ export default function Dashboard() {
                         <p className="break-words text-sm font-medium text-slate-900">{p.label}</p>
                         <p className="text-xs text-slate-500">Version {p.version} · Updated {formatDateTime(p.updated_at)}</p>
                       </div>
-                      <Link to={`/patients/${p.id}/edit`} className="btn-ghost px-2.5 py-1 text-xs opacity-80 group-hover:opacity-100" aria-label={`Edit patient ${p.label}`}>
+                      <Link to={ROUTES.editPatient(p.id)} className="btn-ghost px-2.5 py-1 text-xs opacity-80 group-hover:opacity-100" aria-label={`Edit patient ${p.label}`}>
                         Edit
                       </Link>
                     </li>
@@ -312,7 +313,7 @@ export default function Dashboard() {
                   return (
                     <li key={r.run_id} className="animate-fade-up" style={{ animationDelay: `${Math.min(i, 10) * 30}ms` }}>
                       <Link
-                        to={done ? `/results/${r.run_id}` : `/analysis/${r.run_id}`}
+                        to={done ? ROUTES.results(r.run_id) : ROUTES.analysis(r.run_id)}
                         className="group flex flex-col gap-2 rounded-lg px-2 py-2.5 transition-colors hover:bg-slate-50 sm:flex-row sm:items-center sm:justify-between"
                         aria-label={`${done ? "View results" : "View progress"} for ${r.patient_label} in ${r.trial_title}`}
                       >

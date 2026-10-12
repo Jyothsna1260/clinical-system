@@ -1,7 +1,7 @@
 """Persisted record types. Each record is stored as one JSON document on local disk."""
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -12,7 +12,7 @@ def new_id() -> str:
 
 
 def utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class Record(BaseModel):
@@ -40,7 +40,8 @@ class TrialRecord(OwnedRecord):
     status: str = "processing"  # processing | ready | error
     index_status: str = "pending"  # pending | building | ready:<kind> | error
     current_version: int = 1
-    error: dict[str, Any] | None = None
+    error: dict[str, Any] | None = None  # upload / extraction failure
+    index_error: dict[str, Any] | None = None  # retrieval-index build failure (internal; keyword index is used)
 
 
 class ProtocolDocumentRecord(OwnedRecord):

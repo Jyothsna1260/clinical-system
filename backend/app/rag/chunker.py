@@ -8,7 +8,9 @@ from app.rag.pdf_loader import PageText
 CHUNK_SIZE = 500
 CHUNK_OVERLAP = 100
 
-_SECTION_HEADINGS = re.compile(r"^\s*(?:\d+(?:\.\d+)*\s+)?(inclusion criteria|exclusion criteria)\s*:?\s*$", re.I | re.M)
+_SECTION_HEADINGS = re.compile(
+    r"^\s*(?:\d+(?:\.\d+)*\s+)?(inclusion criteria|exclusion criteria)\s*:?\s*$", re.I | re.M
+)
 
 
 @dataclass

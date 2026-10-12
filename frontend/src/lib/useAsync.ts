@@ -16,9 +16,14 @@ export function useAsync<T>(loader: () => Promise<T>, deps: unknown[]): AsyncSta
   const [nonce, setNonce] = useState(0);
   const loaderRef = useRef(loader);
   loaderRef.current = loader;
+  const prevDeps = useRef<unknown[] | null>(null);
 
   useEffect(() => {
     let cancelled = false;
+    // New inputs (e.g. another run id in the URL) clear old data; a plain reload keeps it on screen.
+    const changed = prevDeps.current !== null && deps.some((d, i) => !Object.is(d, prevDeps.current?.[i]));
+    prevDeps.current = deps;
+    if (changed) setData(null);
     setLoading(true);
     setError(null);
     loaderRef
@@ -35,6 +40,8 @@ export function useAsync<T>(loader: () => Promise<T>, deps: unknown[]): AsyncSta
     return () => {
       cancelled = true;
     };
+    // The caller owns `deps` (like useEffect's own dependency list); `nonce` forces a reload.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [...deps, nonce]);
 
   const reload = useCallback(() => setNonce((n) => n + 1), []);

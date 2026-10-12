@@ -29,7 +29,8 @@ def test_pdf_criteria_with_page_numbers(fixture_path):
 def test_defined_exclusion_is_numeric(fixture_path):
     criteria = extract_rule_based(load_pdf(fixture_path("protocol_renal_defined.pdf")), "t1")
     exc1 = next(c for c in criteria if c.criterion_id == "EXC-01")
-    assert (exc1.normalized_rule.attribute, exc1.normalized_rule.operator, exc1.normalized_rule.value) == ("egfr", "lt", 30)
+    r = exc1.normalized_rule
+    assert (r.attribute, r.operator, r.value) == ("egfr", "lt", 30)
     assert exc1.requires_human_review is False
 
 

@@ -24,7 +24,8 @@ PROTOCOLS = [("protocol_renal.pdf", "SYN-RENAL-001 (severe renal impairment unde
              ("protocol_renal_defined.pdf", "SYN-RENAL-001b (severe renal impairment defined as eGFR < 30)"),
              ("protocol_hepatic.pdf", "SYN-HEP-002 (liver safety study, HP-42)"),
              ("protocol_cardio.pdf", "SYN-CARDIO-003 (heart failure study, CV-9)")]
-PATIENTS = ["patient_69_egfr28.json", "patient_all_pass.json", "patient_missing_egfr.json", "patient_conflicting_egfr.json",
+PATIENTS = ["patient_69_egfr28.json", "patient_all_pass.json", "patient_missing_egfr.json",
+            "patient_conflicting_egfr.json",
             "patient_hep_eligible.json", "patient_hep_high_alt.json", "patient_hep_stale_labs.json",
             "patient_cardio_eligible.json", "patient_cardio_recent_mi.json", "patient_cardio_incomplete.json"]
 # (protocol, patient) pairs assessed with --analyze; the first is the mandatory acceptance case.
@@ -62,7 +63,8 @@ def seed(api_url: str, email: str, password: str, analyze: bool) -> int:
                 print(f"trial exists: {title}")
                 continue
             with open(FIXTURES / name, "rb") as fh:
-                r = client.post("/api/trials/upload", files={"file": (name, fh, "application/pdf")}, data={"title": title})
+                r = client.post("/api/trials/upload", files={"file": (name, fh, "application/pdf")},
+                                data={"title": title})
             r.raise_for_status()
             trial = r.json()
             trial_ids[name] = trial["id"]

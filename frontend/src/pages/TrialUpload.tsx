@@ -1,34 +1,40 @@
 import { useState, type ChangeEvent, type DragEvent, type FormEvent } from "react";
 import { Link } from "react-router-dom";
-import { parseApiError, uploadTrial } from "../api/client";
+import { getHealth, parseApiError, uploadTrial } from "../api/client";
 import { CriteriaPreview } from "../components/CriteriaPreview";
 import { FileIcon, UploadIcon } from "../components/Icons";
 import { ReviewNotice } from "../components/ReviewNotice";
 import { StatusBadge } from "../components/StatusBadge";
 import { useToast } from "../components/Toast";
+import { WorkflowSteps } from "../components/WorkflowSteps";
 import type { TrialDetail } from "../types";
 import { humanize } from "../lib/format";
+import { useAsync } from "../lib/useAsync";
+import { ROUTES } from "../lib/routes";
 
-const MAX_MB = 20;
-const MAX_BYTES = MAX_MB * 1024 * 1024;
+/** Used until /api/health reports the server's limit (the server enforces it either way). */
+const DEFAULT_MAX_MB = 20;
 
-const ERROR_HINTS: Record<string, string> = {
-  INVALID_FILE_TYPE: "The file is not a valid PDF. Upload the protocol as a PDF document.",
-  UNREADABLE_PDF: "The PDF could not be read (it may be scanned, encrypted or corrupted). Try a text-based PDF export.",
-  FILE_TOO_LARGE: `The file exceeds the ${MAX_MB} MB limit.`,
-  EMPTY_FILE: "The uploaded file is empty.",
-};
+function errorHints(maxMb: number, maxPages: number | undefined): Record<string, string> {
+  return {
+    INVALID_FILE_TYPE: "The file is not a valid PDF. Upload the protocol as a PDF document.",
+    UNREADABLE_PDF: "The PDF could not be read (it may be scanned, encrypted or corrupted). Try a text-based PDF export.",
+    FILE_TOO_LARGE: `The file exceeds the ${maxMb} MB limit.`,
+    TOO_MANY_PAGES: `The PDF has more pages than the ${maxPages ?? "allowed"}-page limit. Upload the eligibility section or a shorter protocol.`,
+    EMPTY_FILE: "The uploaded file is empty.",
+  };
+}
 
 interface UploadError {
   code: string;
   message: string;
 }
 
-function validateFile(file: File): string | null {
+function validateFile(file: File, maxMb: number): string | null {
   const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
   if (!isPdf) return "Only PDF files are accepted.";
   if (file.size === 0) return "The selected file is empty.";
-  if (file.size > MAX_BYTES) return `The file is ${(file.size / 1024 / 1024).toFixed(1)} MB; the limit is ${MAX_MB} MB.`;
+  if (file.size > maxMb * 1024 * 1024) return `The file is ${(file.size / 1024 / 1024).toFixed(1)} MB; the limit is ${maxMb} MB.`;
   return null;
 }
 
@@ -42,12 +48,15 @@ export default function TrialUpload() {
   const [clientError, setClientError] = useState<string | null>(null);
   const [apiError, setApiError] = useState<UploadError | null>(null);
   const [trial, setTrial] = useState<TrialDetail | null>(null);
+  const health = useAsync(getHealth, []);
+  const maxMb = health.data?.max_upload_mb ?? DEFAULT_MAX_MB;
+  const hints = errorHints(maxMb, health.data?.max_pdf_pages);
 
   const pick = (f: File | null | undefined) => {
     setApiError(null);
     setTrial(null);
     if (!f) return;
-    const err = validateFile(f);
+    const err = validateFile(f, maxMb);
     setClientError(err);
     setFile(err ? null : f);
   };
@@ -94,13 +103,14 @@ export default function TrialUpload() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="page-title">Upload trial protocol</h1>
+        <WorkflowSteps current={1} />
+        <h1 className="page-title mt-3">Upload trial protocol</h1>
         <p className="text-sm text-slate-600">
-          Upload a protocol PDF (max {MAX_MB} MB). Inclusion and exclusion criteria are extracted for review.
+          Upload a protocol PDF (max {maxMb} MB). Inclusion and exclusion criteria are extracted for review.
         </p>
       </div>
 
-      <form onSubmit={onSubmit} className="card space-y-4 p-4 sm:p-6" aria-busy={busy}>
+      <form onSubmit={(e) => void onSubmit(e)} className="card space-y-4 p-4 sm:p-6" aria-busy={busy}>
         <div
           onDragOver={(e) => {
             e.preventDefault();
@@ -127,7 +137,7 @@ export default function TrialUpload() {
               aria-describedby="file-help"
             />
           </label>
-          <p id="file-help" className="text-xs text-slate-600">PDF only, up to {MAX_MB} MB.</p>
+          <p id="file-help" className="text-xs text-slate-600">PDF only, up to {maxMb} MB.</p>
           {file ? (
             <p className="flex items-center gap-2 text-sm font-medium text-slate-900">
               <FileIcon /> {file.name} <span className="font-normal text-slate-600">({(file.size / 1024 / 1024).toFixed(2)} MB)</span>
@@ -168,7 +178,7 @@ export default function TrialUpload() {
           <div role="alert" className="rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-900">
             <p className="font-semibold">Upload failed ({apiError.code})</p>
             <p className="mt-1">{apiError.message}</p>
-            {ERROR_HINTS[apiError.code] ? <p className="mt-1">{ERROR_HINTS[apiError.code]}</p> : null}
+            {hints[apiError.code] ? <p className="mt-1">{hints[apiError.code]}</p> : null}
           </div>
         ) : null}
 
@@ -217,8 +227,8 @@ export default function TrialUpload() {
           <CriteriaPreview criteria={trial.criteria} />
           <ReviewNotice compact notice="Extracted criteria are machine-generated. Verify every criterion — especially those flagged “Needs review” — against the source protocol. This is clinical decision support only and supports, but does not replace, qualified clinical review." />
           <div className="flex flex-wrap gap-2">
-            <Link to="/dashboard" className="btn-primary">Go to dashboard</Link>
-            <Link to="/patients/new" className="btn-secondary">Create a patient</Link>
+            <Link to={ROUTES.dashboard} className="btn-primary">Go to dashboard</Link>
+            <Link to={ROUTES.newPatient} className="btn-secondary">Create a patient</Link>
           </div>
         </section>
       ) : null}

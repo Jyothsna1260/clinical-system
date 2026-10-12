@@ -63,6 +63,8 @@ class ParsedRule:
     required_attributes: list[str]
     confidence: float
     review_reasons: list[str] = field(default_factory=list)
+    secondary: NormalizedRule | None = None
+    combinator: str | None = None  # "and" | "or" when `secondary` is set
 
 
 @dataclass
@@ -115,6 +117,9 @@ class _TableRow:
     lines: list[str]  # every non-empty text line the row's cells contribute to the page text
 
 
+_CRITERIA_COLUMN = re.compile(r"criteri|description|eligibility|requirement")
+
+
 def _criteria_table_rows(page: PageText) -> dict[str, _TableRow]:
     """Rows of criteria tables on a page, keyed by the normalized first line of the criterion cell.
 
@@ -127,7 +132,7 @@ def _criteria_table_rows(page: PageText) -> dict[str, _TableRow]:
         if len(table) < 2:
             continue
         header = [normalize_ws(c) for c in table[0]]
-        col = next((i for i, h in enumerate(header) if re.search(r"criteri|description|eligibility|requirement", h)), None)
+        col = next((i for i, h in enumerate(header) if _CRITERIA_COLUMN.search(h)), None)
         if col is None:
             continue
         for row in table[1:]:
@@ -177,7 +182,7 @@ def find_criteria_items(pages: list[PageText]) -> list[RawItem]:
         table_rows = _criteria_table_rows(page)
         skip: list[str] = []  # lines already covered by an emitted table row (header cells too)
         for t in page.tables:
-            if t and any(re.search(r"criteri|description|eligibility|requirement", normalize_ws(c)) for c in t[0]):
+            if t and any(_CRITERIA_COLUMN.search(normalize_ws(c)) for c in t[0]):
                 skip.extend(ln.strip() for c in t[0] for ln in c.splitlines() if ln.strip())
         for raw_line in page.text.splitlines():
             line = raw_line.strip()
@@ -230,8 +235,14 @@ def find_criteria_items(pages: list[PageText]) -> list[RawItem]:
 
 # --------------------------------------------------------------------------- rule parsing
 
-_GTE = r"must not be below|must not be less than|not below|not less than|no less than|at least|greater than or equal to|equal to or greater than|minimum of|≥|>="
-_LTE = r"must not exceed|not exceeding|not exceed|no more than|not more than|not greater than|not above|at most|less than or equal to|equal to or less than|maximum of|≤|<="
+_GTE = "|".join([
+    "must not be below", "must not be less than", "not below", "not less than", "no less than", "at least",
+    "greater than or equal to", "equal to or greater than", "minimum of", "≥", ">=",
+])
+_LTE = "|".join([
+    "must not exceed", "not exceeding", "not exceed", "no more than", "not more than", "not greater than",
+    "not above", "at most", "less than or equal to", "equal to or less than", "maximum of", "≤", "<=",
+])
 _LT = r"below|less than|lower than|under|<"
 _GT = r"above|greater than|more than|higher than|exceeding|exceeds|exceed|>"
 _OPS: list[tuple[str, str]] = [("gte", _GTE), ("lte", _LTE), ("lt", _LT), ("gt", _GT)]
@@ -244,15 +255,19 @@ def _unit_after(text: str, pos: int) -> str | None:
     return normalize_unit(m.group(0)) if m else None
 
 
+_AGE_WORD = r"\bage[ds]?\b"
+
+
 def _parse_age(t: str) -> ParsedRule | None:
-    if "age" not in t and "years" not in t:
+    if not re.search(_AGE_WORD + r"|\byears?\b", t):
         return None
     m = re.search(
-        r"(?:age[d]?|aged)\s*(?:of\s*)?(?:between\s*)?" + _NUM + r"\s*(?:years?\s*)?(?:to|-|and)\s*" + _NUM
+        _AGE_WORD + r"\s*(?:of\s*)?(?:between\s*)?" + _NUM + r"\s*(?:years?\s*)?(?:to|-|and)\s*" + _NUM
         + r"\s*(?:years?)?(?:\s*(?:of age|old))?\s*\(?(inclusive|exclusive)?",
         t,
     ) or re.search(
-        r"(?:between\s*)?" + _NUM + r"\s*(?:to|-|and)\s*" + _NUM + r"\s*years?\s*(?:of age|old)?\s*\(?(inclusive|exclusive)?",
+        r"(?:between\s*)?" + _NUM + r"\s*(?:to|-|and)\s*" + _NUM
+        + r"\s*years?\s*(?:of age|old)?\s*\(?(inclusive|exclusive)?",
         t,
     )
     if m:
@@ -261,15 +276,16 @@ def _parse_age(t: str) -> ParsedRule | None:
         inclusive: bool | None = {"inclusive": True, "exclusive": False}.get(incl or "")
         if inclusive is None:
             reasons.append("Age range does not state whether the bounds are inclusive.")
-        rule = NormalizedRule(attribute="age", operator="between", value=lo, value_max=hi, unit="years", inclusive=inclusive)
+        rule = NormalizedRule(attribute="age", operator="between", value=lo, value_max=hi, unit="years",
+                              inclusive=inclusive)
         return ParsedRule(rule, ["age"], 0.95 if inclusive is not None else 0.75, reasons)
     patterns = [
-        ("gte", r"(?:age[d]?\s*)?(?:≥|>=|at least)\s*" + _NUM + r"\s*years"),
+        ("gte", r"(?:≥|>=|at least)\s*" + _NUM + r"\s*years"),
         ("gte", _NUM + r"\s*years\s*(?:of age\s*)?(?:or|and)\s*(?:older|above|over)"),
-        ("gte", r"age[d]?\s*(?:≥|>=)\s*" + _NUM),
-        ("gt", r"(?:age[d]?\s*)?(?:older than|over|>)\s*" + _NUM + r"\s*years"),
-        ("lt", r"(?:age[d]?\s*)?(?:younger than|under|<)\s*" + _NUM + r"\s*years"),
-        ("lte", r"(?:age[d]?\s*)?(?:≤|<=|at most|no older than)\s*" + _NUM + r"\s*years"),
+        ("gte", _AGE_WORD + r"\s*(?:≥|>=)\s*" + _NUM),
+        ("gt", r"(?:older than|over|>)\s*" + _NUM + r"\s*years"),
+        ("lt", r"(?:younger than|under|<)\s*" + _NUM + r"\s*years"),
+        ("lte", r"(?:≤|<=|at most|no older than)\s*" + _NUM + r"\s*years"),
     ]
     for op, pat in patterns:
         m = re.search(pat, t)
@@ -277,6 +293,52 @@ def _parse_age(t: str) -> ParsedRule | None:
             rule = NormalizedRule(attribute="age", operator=op, value=float(m.group(1)), unit="years")
             return ParsedRule(rule, ["age"], 0.9)
     return None
+
+
+def _first_comparator(text: str, anchored: bool = False) -> tuple[int, str, re.Match] | None:
+    """Earliest "<comparator> <number>" in text (or only at its start when anchored)."""
+    best: tuple[int, str, re.Match] | None = None
+    for op, phrases in _OPS:
+        pattern = r"(?:" + phrases + r")\s*(?:a\s+value\s+of\s*)?" + _NUM
+        m = re.match(r"\s*" + pattern, text) if anchored else re.search(pattern, text)
+        if m and (best is None or m.start() < best[0]):
+            best = (m.start(), op, m)
+    return best
+
+
+# A connector right after a threshold, allowing up to two unit tokens: "1.5 mg/dl or ...", "30 and ...".
+_CONNECTOR = re.compile(r"\s*(?:\S+\s+){0,2}?(and/or|or|and)\s+")
+
+
+def _second_clause(attribute: str, rest: str) -> tuple[str, NormalizedRule | None, str] | None:
+    """Parse a clause joined to a threshold by and/or, e.g. "... or creatinine clearance < 40 mL/min".
+
+    Returns (combinator, rule, attribute of the second clause), with rule None when a second lab is
+    named but its threshold cannot be parsed. Returns None when there is no second numeric clause.
+    """
+    conn = _CONNECTOR.match(rest)
+    if not conn:
+        return None
+    combinator = "and" if conn.group(1) == "and" else "or"
+    second = rest[conn.end():]
+    found = find_lab_in_text(second)
+    if found and second.find(found[1]) < 40:
+        attr2, alias2 = found
+        tail2 = second[second.find(alias2) + len(alias2):]
+        cmp2 = _first_comparator(tail2)
+        if cmp2 is None or cmp2[0] > 30:
+            return combinator, None, attr2
+    else:
+        # Same attribute, second bound: the comparator must follow the connector directly ("and <= 90").
+        attr2, tail2 = attribute, second
+        cmp2 = _first_comparator(second, anchored=True)
+        if cmp2 is None:
+            return None
+    _, op2, m2 = cmp2
+    unit2 = _unit_after(tail2, m2.end())
+    rule2 = NormalizedRule(attribute=attr2, operator=op2, value=float(m2.group(1)),  # type: ignore[arg-type]
+                           unit=unit2 or CANONICAL_UNITS.get(attr2))
+    return combinator, rule2, attr2
 
 
 def _parse_lab(t: str) -> ParsedRule | None:
@@ -292,13 +354,15 @@ def _parse_lab(t: str) -> ParsedRule | None:
         reasons.append("Threshold is relative to the upper limit of normal; patient reference range required.")
         return ParsedRule(None, [attribute], 0.5, reasons)
 
-    window = re.search(r"(?:measured|obtained|collected|result|value)?\s*within\s*(?:the\s*)?(?:last\s*|past\s*)?" + _NUM + r"\s*(days?|weeks?|months?)", tail)
+    window = re.search(r"(?:measured|obtained|collected|result|value)?\s*within\s*(?:the\s*)?(?:last\s*|past\s*)?"
+                       + _NUM + r"\s*(days?|weeks?|months?)", tail)
     if window:
         days = float(window.group(1)) * {"d": 1, "w": 7, "m": 30}[window.group(2)[0]]
         stale_days = get_settings().stale_days
         if days != stale_days:
             reasons.append(
-                f"Protocol requires a result from the last {days:g} days; automatic staleness checks use {stale_days} days."
+                f"Protocol requires a result from the last {days:g} days; "
+                f"automatic staleness checks use {stale_days} days."
             )
 
     between = re.search(r"between\s*" + _NUM + r"\s*%?\s*(?:and|to|-)\s*" + _NUM, tail) or re.match(
@@ -317,31 +381,51 @@ def _parse_lab(t: str) -> ParsedRule | None:
         )
         return ParsedRule(rule, [attribute], 0.9 if inclusive is not None else 0.75, reasons)
 
-    best: tuple[int, str, re.Match] | None = None
-    for op, phrases in _OPS:
-        m = re.search(r"(?:" + phrases + r")\s*(?:a\s+value\s+of\s*)?" + _NUM, tail)
-        if m and (best is None or m.start() < best[0]):
-            best = (m.start(), op, m)
+    best = _first_comparator(tail)
     postfix = re.search(_NUM + r"\s*(\S+)?\s*or\s*(more|greater|higher|above|less|lower|below)", tail)
     if best is None and postfix:
         op = "gte" if postfix.group(3) in {"more", "greater", "higher", "above"} else "lte"
         value = float(postfix.group(1))
         unit = _unit_after(tail, postfix.start(1) + len(postfix.group(1)))
+        start, end = postfix.start(), postfix.end()
     elif best is not None:
         _, op, m = best
         value = float(m.group(1))
         unit = _unit_after(tail, m.end())
+        start, end = m.start(), m.end()
     else:
         reasons.append(f"{alias} is mentioned but no numeric threshold could be parsed.")
         return ParsedRule(None, [attribute], 0.4, reasons)
 
-    confidence = 0.92
+    # Compound criteria. (a) Shared threshold: "ALT or AST > 100 U/L". (b) A second clause after the
+    # threshold: "eGFR >= 30 and <= 90", "creatinine > 1.5 mg/dL or creatinine clearance < 40 mL/min".
+    secondary: NormalizedRule | None = None
+    combinator: str | None = None
+    shared = re.match(r"\s*(and/or|or|and)\s+(.*)$", tail[:start])
+    shared_lab = find_lab_in_text(shared.group(2)) if shared else None
+    if shared and shared_lab and shared_lab[0] != attribute:
+        combinator = "and" if shared.group(1) == "and" else "or"
+        secondary = NormalizedRule(attribute=shared_lab[0], operator=op, value=value,  # type: ignore[arg-type]
+                                   unit=unit or CANONICAL_UNITS.get(shared_lab[0]))
+    else:
+        clause = _second_clause(attribute, tail[end:])
+        if clause is not None:
+            combinator, secondary, attr2 = clause
+            if secondary is None:
+                reasons.append("Compound criterion: the second clause could not be parsed into a rule; "
+                               "requires review.")
+                return ParsedRule(None, sorted({attribute, attr2}), 0.4, reasons)
+            if unit is None and secondary.attribute == attribute and secondary.unit:
+                unit = secondary.unit  # "30 and <= 90 mL/min/1.73m2": the unit is stated once, at the end
+
+    confidence = 0.92 if secondary is None else 0.88
     if unit is None:
         unit = CANONICAL_UNITS.get(attribute)
         reasons.append(f"Unit not stated in protocol text; assumed {unit}.")
         confidence = 0.7
     rule = NormalizedRule(attribute=attribute, operator=op, value=value, unit=unit)  # type: ignore[arg-type]
-    return ParsedRule(rule, [attribute], confidence, reasons)
+    attrs = [attribute] + ([secondary.attribute] if secondary and secondary.attribute != attribute else [])
+    return ParsedRule(rule, attrs, confidence, reasons, secondary, combinator)
 
 
 _CONDITION_PREFIXES = re.compile(
@@ -440,6 +524,8 @@ def _build_criterion(
         category=category,  # type: ignore[arg-type]
         original_text=text,
         normalized_rule=parsed.rule,
+        secondary_rule=parsed.secondary if parsed.rule is not None else None,
+        rule_combinator=parsed.combinator if parsed.rule is not None and parsed.secondary is not None else None,
         required_attributes=parsed.required_attributes,
         source_page=page,
         source_excerpt=excerpt,
@@ -532,6 +618,20 @@ LLM_SYSTEM = (
 )
 
 
+def _required_attributes(rule: NormalizedRule | None) -> list[str]:
+    """Patient attributes a model-proposed rule needs, named like the rule-based extractor names them.
+
+    Condition rules use "condition:<terms>" so the Patient Profile Agent does not report a lab-style
+    "condition" value as missing.
+    """
+    if rule is None:
+        return []
+    if rule.attribute == "condition":
+        terms = rule.value if isinstance(rule.value, list) else [str(rule.value)]
+        return ["condition:" + "|".join(terms)]
+    return [rule.attribute]
+
+
 def extract_with_llm(pages: list[PageText], trial_id: str, llm: LLMClient) -> list[Criterion]:
     doc = "\n".join(f'<document page="{p.page}">\n{p.text}\n</document>' for p in pages)
     data = llm.complete_json(LLM_SYSTEM, f"Extract the eligibility criteria.\n{doc}", LLM_SCHEMA)
@@ -559,8 +659,7 @@ def extract_with_llm(pages: list[PageText], trial_id: str, llm: LLMClient) -> li
             reasons.append(str(raw["ambiguity_reason"]))
         if rule and rule.operator == "between" and rule.inclusive is None:
             reasons.append("Range does not state whether the bounds are inclusive.")
-        attrs = [rule.attribute] if rule else []
-        parsed = ParsedRule(rule, attrs, 0.85 if rule and not reasons else 0.6, reasons)
+        parsed = ParsedRule(rule, _required_attributes(rule), 0.85 if rule and not reasons else 0.6, reasons)
         criteria.append(
             _build_criterion(
                 trial_id, category, counters[category], str(raw.get("original_text", "")).strip(),
@@ -568,14 +667,43 @@ def extract_with_llm(pages: list[PageText], trial_id: str, llm: LLMClient) -> li
                 pages_by_no, parsed, "llm",
             )
         )
-    return criteria
+    return _link_data_completeness(criteria)
+
+
+_ELIGIBILITY_HINT = re.compile(r"inclusion|exclusion|eligibility", re.IGNORECASE)
+LLM_CHAR_BUDGET = 120_000
+
+
+def select_llm_pages(pages: list[PageText], budget: int = LLM_CHAR_BUDGET) -> tuple[list[PageText], str | None]:
+    """Pages worth sending to the LLM: those mentioning eligibility, plus one page either side.
+
+    Keeps long protocols within the model's context window and cost. Returns the pages (in order)
+    and a note when the selection or the character budget left pages out.
+    """
+    hits = {p.page for p in pages if _ELIGIBILITY_HINT.search(p.text)}
+    wanted = {n for h in hits for n in (h - 1, h, h + 1)} if hits else {p.page for p in pages}
+    selected, used = [], 0
+    for p in pages:
+        if p.page not in wanted:
+            continue
+        if used + len(p.text) > budget and selected:
+            break
+        selected.append(p)
+        used += len(p.text)
+    if len(selected) == len(pages):
+        return selected, None
+    sent = ", ".join(str(p.page) for p in selected)
+    return selected, f"LLM extraction used pages {sent} of {len(pages)} (pages mentioning eligibility criteria)."
 
 
 def extract_criteria(pages: list[PageText], trial_id: str, llm: LLMClient | None = None) -> ExtractionResult:
     warnings: list[str] = []
     if llm is not None:
+        llm_pages, note = select_llm_pages(pages)
+        if note:
+            warnings.append(note)
         try:
-            criteria = extract_with_llm(pages, trial_id, llm)
+            criteria = extract_with_llm(llm_pages, trial_id, llm)
             if criteria:
                 return ExtractionResult(criteria, "llm", warnings)
             warnings.append("LLM returned no criteria; used rule-based extractor.")

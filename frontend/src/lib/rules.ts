@@ -1,4 +1,4 @@
-import type { NormalizedRule } from "../types";
+import type { Criterion, NormalizedRule } from "../types";
 
 const OP_TEXT: Record<string, string> = {
   gt: ">",
@@ -35,6 +35,12 @@ export function ruleSummary(rule: NormalizedRule | null | undefined): string {
     case "within_days":
       return `${attr} within ${val(rule.value)} days`;
     default:
-      return `${attr} ${rule.operator} ${val(rule.value)}${unit}`;
+      return `${attr} ${String(rule.operator)} ${val(rule.value)}${unit}`;
   }
+}
+
+/** Summary of a criterion's full rule, including the second clause of a compound criterion. */
+export function criterionRuleSummary(c: Pick<Criterion, "normalized_rule" | "secondary_rule" | "rule_combinator">): string {
+  const first = ruleSummary(c.normalized_rule);
+  return c.secondary_rule && c.rule_combinator ? `${first} ${c.rule_combinator} ${ruleSummary(c.secondary_rule)}` : first;
 }

@@ -11,7 +11,7 @@
    decided) and, from persistent memory, what changed since the previous assessment.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.agents.contradiction import ContradictionReport
 from app.config import HUMAN_REVIEW_NOTICE
@@ -31,7 +31,8 @@ def _evidence_gate(evals: list[CriterionEvaluation], notes: list[str]) -> list[C
     out = []
     for e in evals:
         if e.status != "UNKNOWN" and not e.evidence_references:
-            notes.append(f"{e.criterion_id}: {e.status} finding had no verifiable protocol citation and was downgraded to UNKNOWN.")
+            notes.append(f"{e.criterion_id}: {e.status} finding had no verifiable protocol citation "
+                         "and was downgraded to UNKNOWN.")
             e = e.model_copy(update={
                 "status": "UNKNOWN",
                 "comparison_method": "not_evaluable",
@@ -92,7 +93,8 @@ def review_and_decide(
         status = "MORE_INFORMATION_REQUIRED"
         decisive = unknown + semantic + soft_fail_inc
         reasons = [f"{e.criterion_id} {e.status}: {e.explanation}" for e in unknown]
-        reasons += [f"{e.criterion_id} decided by semantic model only and requires confirmation." for e in semantic + soft_fail_inc]
+        reasons += [f"{e.criterion_id} decided by semantic model only and requires confirmation."
+                    for e in semantic + soft_fail_inc]
         reasons += [f"Conflict: {c.description}" for c in report.conflicts]
         if not inclusion:
             reasons.append("No inclusion criteria were evaluated.")
@@ -106,12 +108,15 @@ def review_and_decide(
         )
 
     if triggers:
-        explanation += f" {len(triggers)} Silent Exclusion Trigger(s) identified: " + " ".join(t.explanation for t in triggers)
+        explanation += (f" {len(triggers)} Silent Exclusion Trigger(s) identified: "
+                        + " ".join(t.explanation for t in triggers))
     explanation += " " + HUMAN_REVIEW_NOTICE
 
     for e in inclusion + exclusion:
-        if e.status != "UNKNOWN" and any("not defined numerically" in n or "inclusive" in n for n in e.uncertainty_notes):
-            notes.append(f"{e.criterion_id}: protocol wording is flagged as ambiguous; outcome relied on explicit documentation or an unambiguous value.")
+        ambiguous = any("not defined numerically" in n or "inclusive" in n for n in e.uncertainty_notes)
+        if e.status != "UNKNOWN" and ambiguous:
+            notes.append(f"{e.criterion_id}: protocol wording is flagged as ambiguous; outcome relied on "
+                         "explicit documentation or an unambiguous value.")
 
     return EligibilityResult(
         run_id=run_id,
@@ -125,7 +130,7 @@ def review_and_decide(
         final_explanation=explanation.strip(),
         human_review_notice=HUMAN_REVIEW_NOTICE,
         protocol_version=protocol_version,
-        analyzed_at=analyzed_at or datetime.now(timezone.utc),
+        analyzed_at=analyzed_at or datetime.now(UTC),
         reviewer_notes=notes,
     )
 
@@ -153,14 +158,17 @@ def patient_values_used(profile: NormalizedProfile, evaluations: list[CriterionE
         if av.observations:
             obs = av.observations[0]
             converted = obs.original_unit != obs.unit or obs.original_value != obs.value
-            source = f"{obs.source_name} {_fmt(obs.original_value, obs.original_unit)}" + (" (converted)" if converted else "")
+            source = f"{obs.source_name} {_fmt(obs.original_value, obs.original_unit)}"
+            if converted:
+                source += " (converted)"
         out.append(PatientValueUsed(
             attribute=attr, label=label(attr),
             value=_fmt(av.value, av.unit) if av.value is not None else "Not documented",
             observed_at=av.observed_at, status=av.status, source=source, criterion_ids=criterion_ids,
         ))
 
-    condition_ids = by_attr.get("condition", []) + [cid for a, ids in by_attr.items() if a.startswith("event:") for cid in ids]
+    event_ids = [cid for a, ids in by_attr.items() if a.startswith("event:") for cid in ids]
+    condition_ids = by_attr.get("condition", []) + event_ids
     records = [("diagnosis", d.name, d.documented_at) for d in profile.diagnoses]
     records += [("medication", m.name, m.start_date) for m in profile.medications]
     records += [("history", h.condition, None) for h in profile.history]

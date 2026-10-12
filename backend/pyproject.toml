@@ -1,0 +1,26 @@
+# Tooling configuration only (dependencies are pinned in requirements.txt; tests are configured in pytest.ini).
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+extend-exclude = ["data", ".venv"]
+
+[tool.ruff.lint]
+# pycodestyle, pyflakes, import order, bugbear, pyupgrade, simplify
+select = ["E", "W", "F", "I", "B", "UP", "SIM"]
+ignore = [
+    "B008",    # FastAPI's Depends()/File() in argument defaults is the framework idiom
+    "SIM108",  # ternaries are not always clearer than if/else
+    "UP046",   # keep TypeVar-based generics; PEP 695 syntax is a style change only
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app", "scripts", "tests"]
+
+[tool.ruff.format]
+# `ruff format` is available (black-compatible) but the codebase is not mass-reformatted, to keep
+# diffs reviewable; `ruff check` is the enforced gate.
+line-ending = "lf"

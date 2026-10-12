@@ -35,6 +35,39 @@ export function formatValue(value: unknown): string {
   try {
     return JSON.stringify(value);
   } catch {
-    return String(value);
+    return "[value cannot be displayed]"; // circular or non-serializable
   }
+}
+
+// Display names for canonical patient attributes (mirrors ATTRIBUTE_LABELS in backend/app/engine/vocabulary.py).
+const ATTRIBUTE_LABELS: Record<string, string> = {
+  age: "Age",
+  egfr: "eGFR",
+  creatinine: "Serum creatinine",
+  crcl: "Creatinine clearance",
+  alt: "ALT",
+  ast: "AST",
+  bilirubin: "Total bilirubin",
+  hemoglobin: "Hemoglobin",
+  platelets: "Platelet count",
+  anc: "ANC",
+  hba1c: "HbA1c",
+  lvef: "LVEF",
+  qtc: "QTc",
+  bmi: "BMI",
+  weight: "Body weight",
+  potassium: "Potassium",
+  sodium: "Sodium",
+  condition: "Documented condition",
+  clinical_review: "Clinical review",
+  data_completeness: "Required results",
+};
+
+/** Human-readable name for an attribute key such as "egfr" or "event:myocardial infarction". */
+export function attributeLabel(attribute: string): string {
+  const known = ATTRIBUTE_LABELS[attribute];
+  if (known) return known;
+  const event = /^event:(.+)$/.exec(attribute);
+  if (event?.[1]) return event[1].charAt(0).toUpperCase() + event[1].slice(1);
+  return humanize(attribute);
 }

@@ -7,7 +7,8 @@
 Writes the renal protocols used by the acceptance tests (protocol_renal.pdf,
 protocol_renal_defined.pdf) plus two demo protocols (protocol_hepatic.pdf,
 protocol_cardio.pdf), and a single-page protocol whose criteria are laid out as ruled
-tables with criterion IDs (protocol_t2d_table.pdf). All content is synthetic. Run from backend/:  python -m scripts.make_synthetic_protocol
+tables with criterion IDs (protocol_t2d_table.pdf). All content is synthetic.
+Run from backend/:  python -m scripts.make_synthetic_protocol
 """
 
 from pathlib import Path
@@ -118,7 +119,9 @@ def _page(c: canvas.Canvas, code: str, number: int, heading: str, lines: list[st
     c.showPage()
 
 
-def write_protocol(path: Path, code: str, title: str, synopsis: list[str], inclusion: list[str], exclusion: list[str]) -> Path:
+def write_protocol(
+    path: Path, code: str, title: str, synopsis: list[str], inclusion: list[str], exclusion: list[str]
+) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     c = canvas.Canvas(str(path), pagesize=A4)
     c.setTitle(title)

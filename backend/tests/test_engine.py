@@ -14,7 +14,9 @@ def rule(**kw) -> NormalizedRule:
     return NormalizedRule(**kw)
 
 
-@pytest.mark.parametrize("value,expected", [(17, False), (18, True), (69, True), (70, True), (70.5, False), (71, False)])
+@pytest.mark.parametrize("value,expected", [
+    (17, False), (18, True), (69, True), (70, True), (70.5, False), (71, False),
+])
 def test_age_between_inclusive_boundaries(value, expected):
     r = rule(attribute="age", operator="between", value=18, value_max=70, unit="years", inclusive=True)
     assert compare(value, r) is expected
@@ -42,7 +44,8 @@ def test_other_operators():
 
 
 def test_describe():
-    assert describe(rule(attribute="egfr", operator="gte", value=30, unit="mL/min/1.73m2")) == "eGFR >= 30 mL/min/1.73m2"
+    egfr_rule = rule(attribute="egfr", operator="gte", value=30, unit="mL/min/1.73m2")
+    assert describe(egfr_rule) == "eGFR >= 30 mL/min/1.73m2"
     assert "inclusive" in describe(rule(attribute="age", operator="between", value=18, value_max=70, inclusive=True))
 
 

@@ -33,6 +33,27 @@ def _resolve_age(profile: PatientProfileInput, as_of: date, flags: list[DataQual
     return AttributeValue(attribute="age", value=float(value), unit="years", observed_at=as_of, status="ok")
 
 
+def _newer_unusable(
+    chosen_at: date | None,
+    unusable: list[tuple[date | None, str]],
+    observations: list[NormalizedObservation],
+) -> str | None:
+    """Describe an observation that may be newer than the chosen one but could not be used, if any.
+
+    That is an unconvertible result dated after (or undated, so not orderable against) the chosen
+    value, or an undated usable result when the chosen value is dated.
+    """
+    if chosen_at is None:
+        return None  # the chosen value is itself undated and is flagged as such
+    for when, text in unusable:
+        if when is None or when > chosen_at:
+            return f"{text}, {'undated' if when is None else when}, unit not convertible"
+    for o in observations:
+        if o.observed_at is None:
+            return f"{o.value:g} {o.unit or ''}".strip() + ", undated"
+    return None
+
+
 def normalize_patient(
     profile: PatientProfileInput,
     required_attributes: list[str] | None = None,
@@ -44,15 +65,20 @@ def normalize_patient(
     attributes: dict[str, AttributeValue] = {"age": _resolve_age(profile, as_of, flags)}
 
     grouped: dict[str, list[NormalizedObservation]] = defaultdict(list)
+    # Observations that could not be used (unit not convertible), kept so that an older usable value
+    # is never presented as current when a newer one exists.
+    unusable: dict[str, list[tuple[date | None, str]]] = defaultdict(list)
     for lab in profile.labs:
         attr = canonical_lab(lab.name)
         if attr is None:
-            flags.append(DataQualityFlag(attribute=lab.name, flag="ambiguous", detail=f"Unrecognized lab name '{lab.name}'."))
+            flags.append(DataQualityFlag(attribute=lab.name, flag="ambiguous",
+                                         detail=f"Unrecognized lab name '{lab.name}'."))
             continue
         try:
             value, unit = to_canonical(attr, lab.value, lab.unit)
         except UnitConversionError as exc:
             flags.append(DataQualityFlag(attribute=attr, flag="unit_unconvertible", detail=str(exc)))
+            unusable[attr].append((lab.observed_at, f"{lab.value:g} {lab.unit or ''}".strip()))
             attributes.setdefault(
                 attr,
                 AttributeValue(attribute=attr, value=None, unit=lab.unit, status="ambiguous", detail=str(exc)),
@@ -83,7 +109,8 @@ def normalize_patient(
             detail = f"{label(attr)} has no observation date; recency cannot be confirmed."
             flags.append(DataQualityFlag(attribute=attr, flag="ambiguous", detail=detail))
             attributes[attr] = AttributeValue(
-                attribute=attr, value=latest.value, unit=latest.unit, status="ambiguous", detail=detail, observations=dated,
+                attribute=attr, value=latest.value, unit=latest.unit, status="ambiguous", detail=detail,
+                observations=dated,
             )
             continue
         if is_stale(latest.observed_at, as_of, stale_days):
@@ -92,6 +119,18 @@ def normalize_patient(
             attributes[attr] = AttributeValue(
                 attribute=attr, value=latest.value, unit=latest.unit, observed_at=latest.observed_at,
                 status="stale", detail=detail, observations=dated,
+            )
+            continue
+        newer_unusable = _newer_unusable(latest.observed_at, unusable.get(attr, []), dated)
+        if newer_unusable:
+            detail = (
+                f"A more recent {label(attr)} result ({newer_unusable}) could not be used, so the value from "
+                f"{latest.observed_at} cannot be treated as current."
+            )
+            flags.append(DataQualityFlag(attribute=attr, flag="ambiguous", detail=detail))
+            attributes[attr] = AttributeValue(
+                attribute=attr, value=latest.value, unit=latest.unit, observed_at=latest.observed_at,
+                status="ambiguous", detail=detail, observations=dated,
             )
             continue
         attributes[attr] = AttributeValue(
@@ -109,7 +148,8 @@ def normalize_patient(
             )
             current = attributes[attr]
         if current.status == "missing" and not any(f.attribute == attr and f.flag == "missing" for f in flags):
-            flags.append(DataQualityFlag(attribute=attr, flag="missing", detail=current.detail or f"{label(attr)} missing."))
+            flags.append(DataQualityFlag(attribute=attr, flag="missing",
+                                         detail=current.detail or f"{label(attr)} missing."))
 
     return NormalizedProfile(
         as_of=as_of,

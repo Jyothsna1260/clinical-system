@@ -1,4 +1,5 @@
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, UploadFile
+from starlette.concurrency import run_in_threadpool
 
 from app.schemas.api import PageOut, TrialDetail, TrialSummary
 from app.schemas.clinical import Criterion
@@ -19,9 +20,13 @@ async def upload_trial(
 ) -> TrialDetail:
     # Read one byte past the limit so oversized files are detected without loading them fully.
     data = await file.read(trials.max_upload_bytes() + 1)
-    trial, doc = trials.upload_protocol(store, user.id, file.filename, file.content_type, title, data)
+    # PDF parsing and the LLM extraction call are blocking; run them in a worker thread so the event
+    # loop keeps serving other requests (status polling, health checks) during a long upload.
+    trial, doc = await run_in_threadpool(
+        trials.upload_protocol, store, user.id, file.filename, file.content_type, title, data
+    )
     background.add_task(trials.build_index_task, trial.id, doc.id)
-    return trials.trial_detail(store, trial)
+    return await run_in_threadpool(trials.trial_detail, store, trial)
 
 
 @router.get("", response_model=list[TrialSummary])

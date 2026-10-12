@@ -9,11 +9,13 @@ import { EvidenceLinks } from "../components/EvidenceLinks";
 import { EvidencePanel, type EvidenceTarget } from "../components/EvidencePanel";
 import { ReviewNotice } from "../components/ReviewNotice";
 import { SilentExclusionCard } from "../components/SilentExclusionCard";
+import { WorkflowSteps } from "../components/WorkflowSteps";
 import { EmptyState, ErrorState, LoadingState } from "../components/States";
 import { OverallStatusBadge, StatusBadge } from "../components/StatusBadge";
-import { formatDate, formatDateTime, formatValue, humanize } from "../lib/format";
+import { attributeLabel, formatDate, formatDateTime, formatValue, humanize } from "../lib/format";
 import { useAsync } from "../lib/useAsync";
 import type { CriterionEvaluation, EligibilityResult } from "../types";
+import { ROUTES } from "../lib/routes";
 
 interface Verdict {
   ring: string;
@@ -33,6 +35,31 @@ const VERDICT: Record<string, Verdict> = {
 
 function countBy(evals: CriterionEvaluation[], status: string): number {
   return evals.filter((e) => e.status === status).length;
+}
+
+/** One plain-language sentence naming what decided the outcome. */
+function summaryLine(r: EligibilityResult): string {
+  const unknown = [...r.inclusion_results, ...r.exclusion_results].filter((e) => e.status === "UNKNOWN");
+  let line: string;
+  if (r.overall_status === "NOT_ELIGIBLE") {
+    const decisive = r.decisive_evidence.filter((e) => e.status === "UNSATISFIED" || e.status === "TRIGGERED");
+    const first = decisive[0];
+    const evaluation = first
+      ? [...r.inclusion_results, ...r.exclusion_results].find((e) => e.criterion_id === first.criterion_id)
+      : undefined;
+    line = first
+      ? `Decided by ${decisive.map((e) => e.criterion_id).join(", ")}: ${evaluation?.original_text.replace(/\.$/, "") ?? first.expected_condition} ` +
+        `(patient ${first.patient_value ?? "value not available"}).`
+      : "A required criterion is not met.";
+  } else if (r.overall_status === "ELIGIBLE") {
+    line = `All ${r.inclusion_results.length} inclusion criteria are met and none of the ${r.exclusion_results.length} exclusion criteria is triggered.`;
+  } else {
+    const what = r.missing_information.map((m) => attributeLabel(m.attribute)).slice(0, 3);
+    line = `${unknown.length} ${unknown.length === 1 ? "criterion" : "criteria"} could not be decided` +
+      (what.length > 0 ? ` (needs: ${what.join(", ")}).` : ".");
+  }
+  const n = r.silent_exclusion_triggers.length;
+  return n > 0 ? `${line} ${n} silent exclusion trigger${n === 1 ? "" : "s"} flagged.` : line;
 }
 
 function Metric({ label, value, total, tone }: { label: string; value: number; total?: number; tone: string }) {
@@ -115,7 +142,7 @@ export default function Results() {
           </div>
           {inProgress ? (
             <p className="text-sm">
-              This analysis is still in progress. <Link to={`/analysis/${d.run_id}`} className="link">View progress</Link>
+              This analysis is still in progress. <Link to={ROUTES.analysis(d.run_id)} className="link">View progress</Link>
             </p>
           ) : (
             <div role="alert" className="rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-900">
@@ -128,7 +155,7 @@ export default function Results() {
           )}
           <div className="flex flex-wrap gap-2">
             <button type="button" className="btn-secondary" onClick={run.reload}>Refresh</button>
-            <Link to="/dashboard" className="btn-secondary">Back to dashboard</Link>
+            <Link to={ROUTES.dashboard} className="btn-secondary">Back to dashboard</Link>
           </div>
         </div>
         <ReviewNotice notice={d.human_review_notice} />
@@ -144,6 +171,7 @@ export default function Results() {
 
   return (
     <div className="space-y-6">
+      <WorkflowSteps current={4} />
       <ReviewNotice notice={notice} />
 
       <section
@@ -158,6 +186,7 @@ export default function Results() {
             <div className="min-w-0 space-y-1">
               <p className="eyebrow">Eligibility assessment</p>
               <h1 id="summary-h" className="page-title">{verdict.headline}</h1>
+              <p className="text-base font-medium text-slate-800">{summaryLine(r)}</p>
               <p className="break-words text-sm text-slate-700">
                 <span className="font-semibold">Trial:</span> {d.trial_title}
               </p>
@@ -170,7 +199,7 @@ export default function Results() {
               </p>
             </div>
           </div>
-          <div className="flex shrink-0 flex-col items-start gap-3 md:items-end" aria-label="Overall recommendation">
+          <div className="order-first flex shrink-0 flex-col items-start gap-3 md:order-none md:items-end" aria-label="Overall recommendation">
             <p className="eyebrow">Overall recommendation</p>
             <OverallStatusBadge status={r.overall_status} />
             <div className="flex gap-2 print:hidden">
@@ -255,12 +284,12 @@ export default function Results() {
         {valuesUsed.length === 0 ? (
           <p className="text-sm text-slate-600">No patient values were recorded for this result.</p>
         ) : (
-          <div className="-mx-4 overflow-x-auto sm:mx-0">
+          <div className="-mx-4 max-h-[60vh] overflow-auto sm:mx-0">
             <table className="w-full min-w-[36rem] text-left text-sm">
-              <thead className="text-xs uppercase text-slate-600">
+              <thead className="sticky top-0 z-10 bg-surface text-xs uppercase text-slate-600 shadow-sm">
                 <tr>
                   <th scope="col" className="px-4 py-2 sm:pl-0">Attribute</th>
-                  <th scope="col" className="px-4 py-2">Value used</th>
+                  <th scope="col" className="px-4 py-2 text-right">Value used</th>
                   <th scope="col" className="px-4 py-2">Observed</th>
                   <th scope="col" className="px-4 py-2">Source (as entered)</th>
                   <th scope="col" className="px-4 py-2">Criteria</th>
@@ -268,9 +297,9 @@ export default function Results() {
               </thead>
               <tbody className="divide-y divide-slate-200">
                 {valuesUsed.map((v, i) => (
-                  <tr key={`${v.attribute}-${i}`}>
+                  <tr key={`${v.attribute}-${i}`} className="even:bg-slate-50/60">
                     <td className="px-4 py-2 font-medium sm:pl-0">{v.label}</td>
-                    <td className="px-4 py-2">
+                    <td className="px-4 py-2 text-right tabular-nums">
                       {v.value}
                       {v.status !== "ok" ? <span className="ml-2 rounded bg-amber-100 px-1.5 text-xs text-amber-900">{humanize(v.status)}</span> : null}
                     </td>
@@ -293,7 +322,7 @@ export default function Results() {
             <ul className="space-y-2 text-sm">
               {r.missing_information.map((m, i) => (
                 <li key={i} className="rounded-md border border-amber-300 bg-amber-50 p-3 text-amber-950">
-                  <p className="font-semibold">Missing: {m.attribute}</p>
+                  <p className="font-semibold">Missing: {attributeLabel(m.attribute)}</p>
                   <p>{m.reason}</p>
                   {m.criterion_ids.length > 0 ? <p className="mt-1 font-mono text-xs">Affects {m.criterion_ids.join(", ")}</p> : null}
                 </li>
@@ -326,7 +355,7 @@ export default function Results() {
             The previous assessment of this patient for this trial (profile version {r.prior_assessment.patient_profile_version}
             {r.prior_assessment.analyzed_at ? `, ${formatDateTime(r.prior_assessment.analyzed_at)}` : ""}) was{" "}
             <span className="font-semibold">{humanize(r.prior_assessment.overall_status ?? "unknown")}</span>.{" "}
-            <Link to={`/results/${r.prior_assessment.run_id}`} className="link">Open it</Link>
+            <Link to={ROUTES.results(r.prior_assessment.run_id)} className="link">Open it</Link>
           </p>
           {r.prior_assessment.changed_criteria.length > 0 ? (
             <ul className="mt-2 list-disc pl-5 font-mono text-xs">
@@ -406,8 +435,8 @@ export default function Results() {
       <ReviewNotice notice={notice} />
 
       <div className="flex flex-wrap gap-2">
-        <Link to="/dashboard" className="btn-secondary">Back to dashboard</Link>
-        <Link to={`/patients/${d.patient_id}/edit`} className="btn-secondary">Update patient data</Link>
+        <Link to={ROUTES.dashboard} className="btn-secondary">Back to dashboard</Link>
+        <Link to={ROUTES.editPatient(d.patient_id)} className="btn-secondary">Update patient data</Link>
       </div>
 
       {evidence ? <EvidencePanel trialId={d.trial_id} target={evidence} onClose={closeEvidence} /> : null}

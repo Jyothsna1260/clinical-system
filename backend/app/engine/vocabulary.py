@@ -7,7 +7,8 @@ import re
 
 # canonical attribute -> aliases as they appear in protocols or patient records (lower case)
 LAB_ALIASES: dict[str, list[str]] = {
-    "egfr": ["egfr", "e-gfr", "estimated gfr", "estimated glomerular filtration rate", "glomerular filtration rate", "gfr"],
+    "egfr": ["egfr", "e-gfr", "estimated gfr", "estimated glomerular filtration rate",
+             "glomerular filtration rate", "gfr"],
     "creatinine": ["serum creatinine", "creatinine", "scr"],
     "crcl": ["creatinine clearance", "crcl"],
     "alt": ["alanine aminotransferase", "alanine transaminase", "alt", "sgpt"],
@@ -96,11 +97,10 @@ def canonical_lab(name: str) -> str | None:
     for attr, aliases in LAB_ALIASES.items():
         if n == attr or n in aliases:
             return attr
-    for attr, aliases in LAB_ALIASES.items():
-        for alias in aliases:
-            if len(alias) > 3 and alias in n:
-                return attr
-    return None
+    # Substring match: the longest alias wins ("creatinine clearance (cockcroft-gault)" is CrCl).
+    hits = [(len(alias), attr) for attr, aliases in LAB_ALIASES.items() for alias in aliases
+            if len(alias) > 3 and alias in n]
+    return max(hits)[1] if hits else None
 
 
 def find_lab_in_text(text: str) -> tuple[str, str] | None:
@@ -110,7 +110,9 @@ def find_lab_in_text(text: str) -> tuple[str, str] | None:
     for attr, aliases in LAB_ALIASES.items():
         for alias in sorted(aliases, key=len, reverse=True):
             m = re.search(r"(?<![a-z0-9])" + re.escape(alias) + r"(?![a-z0-9])", t)
-            if m and (best is None or m.start() < best[0]):
+            # Earliest mention wins; at the same position the longer alias is more specific
+            # ("creatinine clearance" is CrCl, not creatinine).
+            if m and (best is None or (m.start(), -len(alias)) < (best[0], -len(best[2]))):
                 best = (m.start(), attr, alias)
                 break
     return (best[1], best[2]) if best else None

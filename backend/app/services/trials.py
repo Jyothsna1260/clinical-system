@@ -15,7 +15,14 @@ from app.config import get_settings
 from app.errors import AppError, not_found
 from app.rag.chunker import chunk_pages
 from app.rag.index import build_index, load_index
-from app.rag.pdf_loader import PageText, PDFReadError, is_pdf_bytes, load_pdf_bytes, pages_from_dicts
+from app.rag.pdf_loader import (
+    PageText,
+    PDFReadError,
+    PDFTooManyPagesError,
+    is_pdf_bytes,
+    load_pdf_bytes,
+    pages_from_dicts,
+)
 from app.schemas.api import PageOut, TrialDetail, TrialSummary
 from app.schemas.clinical import Criterion
 from app.services import audit
@@ -102,7 +109,10 @@ def upload_protocol(
     _validate_upload(filename, content_type, data)
     name = (filename or "protocol.pdf")[:300]
     try:
-        pages = load_pdf_bytes(data)
+        pages = load_pdf_bytes(data, max_pages=get_settings().max_pdf_pages)
+    except PDFTooManyPagesError as exc:
+        raise AppError(400, "TOO_MANY_PAGES", f"{exc}. Upload the eligibility section or a shorter protocol.",
+                       {"filename": filename, "max_pages": get_settings().max_pdf_pages}) from exc
     except PDFReadError as exc:
         raise AppError(400, "UNREADABLE_PDF", str(exc), {"filename": filename}) from exc
 
@@ -112,21 +122,23 @@ def upload_protocol(
         trial.status = "ready"
     else:
         trial.status = "error"
-        trial.error = {"code": "NO_CRITERIA", "message": "No inclusion or exclusion criteria were found in the protocol."}
+        trial.error = {"code": "NO_CRITERIA",
+                       "message": "No inclusion or exclusion criteria were found in the protocol."}
 
     store.trials.put(trial)  # the trial first: in PostgreSQL the document references it
     store.documents.put(doc)
+    path = Path(doc.file_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
     audit.record(store, owner_id, "trial.uploaded", "trial", trial.id,
                  {"filename": name, "sha256": doc.sha256, "pages": doc.page_count})
     return trial, doc
 
 
 def _store_document(trial: TrialRecord, filename: str, data: bytes, pages: list[PageText]) -> ProtocolDocumentRecord:
-    """Save the PDF to disk and run Agent A (protocol extraction) over its pages."""
+    """Run Agent A (protocol extraction) over the pages and build the document record."""
     sha = hashlib.sha256(data).hexdigest()
-    path = get_settings().uploads_dir / trial.id / "v1.pdf"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(data)
+    path = get_settings().uploads_dir / trial.id / "v1.pdf"  # written once the records are saved
 
     result = extract_criteria(pages, trial.id, get_llm())
     criteria = sorted(result.criteria, key=lambda c: (c.category != "inclusion", c.criterion_id))
@@ -166,11 +178,11 @@ def build_index_task(trial_id: str, document_id: str) -> None:
         status, error = f"ready:{getattr(idx, 'kind', 'unknown')}", None
     except Exception as exc:
         log.exception("index build failed for trial %s", trial_id)
-        status, error = "error", {"code": "INDEX_FAILED", "message": str(exc)}
+        status, error = "error", {"code": "INDEX_FAILED", "message": f"{type(exc).__name__}: {exc}"}
 
     def finish(trial: TrialRecord) -> None:
         trial.index_status = status
-        if error:
-            trial.error = error
+        # Kept apart from trial.error, which describes upload/extraction failures shown to the user.
+        trial.index_error = error
 
     store.trials.update(trial_id, finish)

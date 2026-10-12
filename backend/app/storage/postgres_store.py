@@ -181,7 +181,10 @@ class PgCollection(Generic[R]):
     def where(self, **equals) -> list[R]:
         """Records whose fields equal the given values; indexed columns are filtered in SQL."""
         sql = {k: v for k, v in equals.items() if k in self._columns}
-        rows = self._select("WHERE " + " AND ".join(f"{k} = %s" for k in sql), tuple(sql.values())) if sql             else self._select()
+        if sql:
+            rows = self._select("WHERE " + " AND ".join(f"{k} = %s" for k in sql), tuple(sql.values()))
+        else:
+            rows = self._select()
         rest = {k: v for k, v in equals.items() if k not in sql}
         return [r for r in rows if all(getattr(r, k) == v for k, v in rest.items())]
 

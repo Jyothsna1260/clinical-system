@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     # Redis holds live workflow state (per-agent progress and outputs) when set; otherwise in-process memory.
     redis_url: str | None = None
     run_state_ttl_seconds: int = 86400
+    # Queued/running runs older than this at startup were interrupted by a restart and are marked failed.
+    stale_run_minutes: int = 30
 
     jwt_secret: str = DEV_JWT_SECRET
     jwt_algorithm: str = "HS256"
@@ -38,6 +40,9 @@ class Settings(BaseSettings):
     llm_api_key: str | None = None
     llm_model: str | None = None
     llm_timeout_seconds: float = 60.0
+    # Send patient data to the LLM to judge free-text criteria ("able to comply with ..."). Only the fields a
+    # criterion can need are sent. Turn off when real patient data must not leave the deployment.
+    llm_semantic_evaluation: bool = True
 
     embeddings_enabled: bool = True
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
@@ -55,8 +60,10 @@ class Settings(BaseSettings):
     web_search_max_queries: int = 3
 
     frontend_origin: str = "http://localhost:5173"
-    frontend_origin_regex: str | None = None  # e.g. Vercel preview URLs: https://cte-system(-[a-z0-9-]+)?\.vercel\.app
+    frontend_origin_regex: str | None = None  # e.g. https://cte-system-[a-z0-9-]+-<team>\.vercel\.app
     max_upload_mb: int = 20
+    max_pdf_pages: int = 300
+    auth_rate_limit_per_minute: int = 10  # login/register attempts per IP (and per email for login); 0 disables
     stale_days: int = 90
     log_level: str = "INFO"
 

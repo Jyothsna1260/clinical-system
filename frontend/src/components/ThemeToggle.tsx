@@ -19,7 +19,7 @@ export function ThemeToggle({ showLabels = false }: { showLabels?: boolean }) {
     const next = OPTIONS[(index + (e.key === "ArrowRight" ? 1 : OPTIONS.length - 1)) % OPTIONS.length];
     if (!next) return;
     setPreference(next.value);
-    (e.currentTarget.querySelector(`[data-value="${next.value}"]`) as HTMLButtonElement | null)?.focus();
+    e.currentTarget.querySelector<HTMLButtonElement>(`[data-value="${next.value}"]`)?.focus();
   };
 
   return (

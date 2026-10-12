@@ -26,7 +26,8 @@ def test_auth_flow(client):
     r = client.post("/api/auth/register", json={"email": "A@Example.org", "password": "password123"})
     assert r.status_code == 201
     token = r.json()["access_token"]
-    assert client.post("/api/auth/register", json={"email": "a@example.org", "password": "password123"}).status_code == 409
+    again = client.post("/api/auth/register", json={"email": "a@example.org", "password": "password123"})
+    assert again.status_code == 409
     bad = client.post("/api/auth/login", json={"email": "a@example.org", "password": "wrong-password"})
     assert bad.status_code == 401 and bad.json()["error"]["code"] == "INVALID_CREDENTIALS"
     ok = client.post("/api/auth/login", json={"email": "a@example.org", "password": "password123"})

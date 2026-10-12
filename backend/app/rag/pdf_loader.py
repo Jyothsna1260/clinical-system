@@ -18,6 +18,10 @@ class PDFReadError(ValueError):
     pass
 
 
+class PDFTooManyPagesError(PDFReadError):
+    pass
+
+
 Table = tuple[tuple[str, ...], ...]
 
 
@@ -52,7 +56,7 @@ def is_pdf_bytes(data: bytes) -> bool:
     return PDF_MAGIC in data[:1024]
 
 
-def load_pdf_bytes(data: bytes) -> list[PageText]:
+def load_pdf_bytes(data: bytes, max_pages: int | None = None) -> list[PageText]:
     if not is_pdf_bytes(data):
         raise PDFReadError("file is not a PDF (missing %PDF header)")
     try:
@@ -62,6 +66,8 @@ def load_pdf_bytes(data: bytes) -> list[PageText]:
     try:
         if doc.needs_pass:
             raise PDFReadError("encrypted PDFs are not supported")
+        if max_pages is not None and doc.page_count > max_pages:
+            raise PDFTooManyPagesError(f"PDF has {doc.page_count} pages; the limit is {max_pages}")
         pages = []
         for i, page in enumerate(doc):
             text = page.get_text("text")

@@ -65,7 +65,12 @@ export function emptyForm(): PatientFormState {
 }
 
 const SEXES: Sex[] = ["male", "female", "other", "unknown"];
-const s = (v: unknown): string => (v === null || v === undefined ? "" : String(v));
+const s = (v: unknown): string => {
+  if (typeof v === "string") return v;
+  if (typeof v === "number" || typeof v === "boolean") return String(v);
+  if (v === null || v === undefined) return "";
+  return JSON.stringify(v);
+};
 
 export function profileToForm(label: string, p: PatientProfileInput): PatientFormState {
   const d = p.demographics ?? {};

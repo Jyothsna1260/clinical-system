@@ -4,6 +4,7 @@ import { analyze, errorMessage } from "../api/client";
 import type { PatientSummary, TrialSummary } from "../types";
 import { InlineError } from "./States";
 import { useToast } from "./Toast";
+import { ROUTES } from "../lib/routes";
 
 /** Select trial (+ patient unless fixed) and start an eligibility run. */
 export function AssessmentLauncher({
@@ -37,7 +38,7 @@ export function AssessmentLauncher({
     try {
       const run = await analyze({ trial_id: trialId, patient_id: pid });
       notify("info", "Assessment started", "Six agents are analysing the patient against the protocol.");
-      navigate(`/analysis/${run.run_id}`);
+      navigate(ROUTES.analysis(run.run_id));
     } catch (err) {
       setError(errorMessage(err));
       setBusy(false);
@@ -45,7 +46,7 @@ export function AssessmentLauncher({
   };
 
   return (
-    <form onSubmit={onSubmit} className="space-y-3" aria-busy={busy}>
+    <form onSubmit={(e) => void onSubmit(e)} className="space-y-3" aria-busy={busy}>
       <div>
         <label htmlFor={`${idPrefix}-trial`} className="label">
           Trial protocol
@@ -65,7 +66,7 @@ export function AssessmentLauncher({
             {trials.some((t) => t.status === "error")
               ? " Protocols marked “error” had no recognisable inclusion or exclusion criteria. Upload a text-based PDF with clearly headed “Inclusion Criteria” and “Exclusion Criteria” sections, or configure an LLM provider for free-form protocols."
               : " Protocols still processing will appear here when ready."}{" "}
-            <Link to="/trials/upload" className="link">Upload a protocol</Link>
+            <Link to={ROUTES.uploadTrial} className="link">Upload a protocol</Link>
           </p>
         ) : null}
       </div>

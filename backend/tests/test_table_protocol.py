@@ -64,7 +64,8 @@ def test_table_criteria_parse_to_rules(pages):
     result = extract_criteria(pages_from_dicts(pages), "trial-t2d")
     rules = {c.criterion_id: c.normalized_rule for c in result.criteria}
     assert all(r is not None for r in rules.values())
-    assert (rules["INC-03"].attribute, rules["INC-03"].value, rules["INC-03"].value_max, rules["INC-03"].inclusive) == ("hba1c", 7.5, 10.5, True)
+    r = rules["INC-03"]
+    assert (r.attribute, r.value, r.value_max, r.inclusive) == ("hba1c", 7.5, 10.5, True)
     assert rules["INC-02"].value == ["type 2 diabetes"]
     assert rules["EXC-01"].value == ["type 1 diabetes"]
     assert rules["EXC-03"].value == ["acute medical instability"]
@@ -113,7 +114,8 @@ def test_continuation_lines_are_not_criterion_ids(text):
 
 
 def test_numbered_list_items_in_title_case_are_not_section_ends():
-    pages = [PageText(1, "Exclusion Criteria\n1. Pregnancy or breastfeeding.\n2. Known Type 1 Diabetes\n3. Severe Renal Impairment")]
+    text = "Exclusion Criteria\n1. Pregnancy or breastfeeding.\n2. Known Type 1 Diabetes\n3. Severe Renal Impairment"
+    pages = [PageText(1, text)]
     assert len(find_criteria_items(pages)) == 3
 
 

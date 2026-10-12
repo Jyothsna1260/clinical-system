@@ -27,5 +27,7 @@ def health(store: Store = Depends(get_store)) -> dict:
         "embeddings_enabled": s.embeddings_enabled,
         "clinical_nlp": s.clinical_nlp_model if s.clinical_nlp_enabled else "disabled",
         "web_search": s.web_search_provider if s.web_search_enabled else "disabled",
+        "max_upload_mb": s.max_upload_mb,
+        "max_pdf_pages": s.max_pdf_pages,
         "human_review_notice": HUMAN_REVIEW_NOTICE,
     }

@@ -27,7 +27,8 @@ def key_terms(criterion: Criterion) -> list[str]:
     rule = criterion.normalized_rule
     text = normalize_text(criterion.original_text)
     if rule is not None and rule.attribute in LAB_ALIASES:
-        alias = next((a for a in sorted(LAB_ALIASES[rule.attribute], key=len, reverse=True) if a in text), rule.attribute)
+        aliases = sorted(LAB_ALIASES[rule.attribute], key=len, reverse=True)
+        alias = next((a for a in aliases if a in text), rule.attribute)
         terms.append(alias)
     if rule is not None and isinstance(rule.value, (int, float)):
         terms.append(f"{rule.value:g}")
